@@ -5,7 +5,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF)
 ![Network](https://img.shields.io/badge/INTERNET%20permission-none-success)
-![Tests](https://img.shields.io/badge/tests-40%20passing-success)
+[![CI](https://github.com/Zer0Rin/yhviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Zer0Rin/yhviewer/actions/workflows/ci.yml)
 
 Screenshots use curated fictional documents and staged recency values. They are native API 37 emulator captures (1080×2400). The sandbox screenshot shows a real 9/9 result from the normal APK without network permission; the temporary-permission run is documented in the verification logs below.
 
@@ -101,6 +101,8 @@ flowchart TB
 ## Testing
 
 **15 JVM tests + 25 instrumented tests**, plus a self-checking sandbox page.
+
+GitHub Actions runs JVM tests, lint and a debug build on pushes and pull requests. Pushes to `main` and manual runs also run the instrumented suite on an API 34 emulator. Test reports and the debug APK are available as workflow artifacts (14-day retention). The temporary-network-permission sandbox round remains a separate acceptance check.
 
 Step-by-step verification logs: [docs/verification/](docs/verification/).
 
