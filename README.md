@@ -7,7 +7,7 @@
 ![Network](https://img.shields.io/badge/INTERNET%20permission-none-success)
 ![Tests](https://img.shields.io/badge/tests-40%20passing-success)
 
-Screenshots use curated fictional documents and staged recency values. They are native emulator captures; see [capture notes](SCREENSHOTS.md).
+Screenshots use curated fictional documents and staged recency values. They are native API 37 emulator captures (1080×2400). The sandbox screenshot shows a real 9/9 result from the normal APK without network permission; the temporary-permission run is documented in the verification logs below.
 
 | Shelf | HTML | Markdown | Sandbox test |
 |---|---|---|---|
@@ -102,6 +102,8 @@ flowchart TB
 
 **15 JVM tests + 25 instrumented tests**, plus a self-checking sandbox page.
 
+Step-by-step verification logs: [docs/verification/](docs/verification/).
+
 | Suite | Type | Count | Covers |
 |---|---|---:|---|
 | `MarkdownRendererTest` | JVM | 10 | JSON/script escaping, closing tags and comments, quotes, controls, Unicode and literal replacement |
@@ -117,7 +119,7 @@ flowchart TB
 
 The **40 tests include the two generated smoke tests**. Re-running a case in dark mode, with a missing library, or with temporary network permission does not add another test to this count. Last full run: **15 JVM + 25 instrumented, zero failures or skips**, on an API 37 emulator.
 
-The process-death check was also performed outside instrumentation: import a dedicated file, `am force-stop` the app, delete that original file, cold-start, then open the shelf copy. Database identity and copied bytes were checked before and after. See [MVP verification](STEP5_VERIFICATION.md).
+The process-death check was also performed outside instrumentation: import a dedicated file, `am force-stop` the app, delete that original file, cold-start, then open the shelf copy. Database identity and copied bytes were checked before and after. See [MVP verification](docs/verification/STEP5_VERIFICATION.md).
 
 ### Sandbox verification
 
@@ -132,7 +134,7 @@ The individual evidence is narrower than claiming every layer was disabled and t
 - CSP is checked through `securitypolicyviolation` events, including an independent `frame-src`/blocked-origin assertion. The page's aggregate iframe check alone could otherwise be satisfied by an earlier violation.
 - Real taps launch a browser Intent; scripted redirects leave the document in place.
 
-CSP-blocked requests may never reach the interceptor, so Logcat alone is insufficient evidence. The temporary permission run removes the OS-permission safety net; it does **not** by itself prove every other layer independently blocks every attack. See [sandbox verification](STEP3_VERIFICATION.md).
+CSP-blocked requests may never reach the interceptor, so Logcat alone is insufficient evidence. The temporary permission run removes the OS-permission safety net; it does **not** by itself prove every other layer independently blocks every attack. See [sandbox verification](docs/verification/STEP3_VERIFICATION.md).
 
 
 ## Tech stack
