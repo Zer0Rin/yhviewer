@@ -104,7 +104,7 @@ flowchart TB
 
 GitHub Actions runs JVM tests, lint and a debug build on pushes and pull requests. Pushes to `main` and manual runs also run the instrumented suite on an API 34 emulator. Test reports and the debug APK are available as workflow artifacts (14-day retention). The temporary-network-permission sandbox round remains a separate acceptance check.
 
-Step-by-step verification logs: [docs/verification/](docs/verification/).
+Step-by-step verification logs: [docs/verification/](docs/verification/), including the [first CI results](docs/verification/CI_VERIFICATION.md).
 
 | Suite | Type | Count | Covers |
 |---|---|---:|---|
@@ -153,7 +153,7 @@ cd yhviewer
 ./gradlew :app:connectedDebugAndroidTest --no-configuration-cache
 ```
 
-Open the project in Android Studio or configure your SDK path locally. The project pins **AGP 9.4.0**, **Gradle 9.6.0**, **compile/target SDK 37**, and a **JDK 25 daemon toolchain**; `minSdk` is **26**. The wrapper/toolchain may download dependencies during development. The installed app itself stays offline. Only the API 37 emulator has been verified so far.
+Open the project in Android Studio or configure your SDK path locally. The project pins **AGP 9.4.0**, **Gradle 9.6.0**, **compile/target SDK 37**, and a **JDK 25 daemon toolchain**; `minSdk` is **26**. The wrapper/toolchain may download dependencies during development. The installed app itself stays offline. Local acceptance used an API 37 emulator; the full instrumented suite also passed on API 34 in GitHub Actions. Real-device verification is still pending.
 
 The missing-library acceptance run temporarily renames `assets/md/markdown-it.min.js`, rebuilds, and runs `MarkdownRenderingIntegrationTest#libraryAvailabilityMatchesBuildVariant` with `missingMarkdown=true`. Restore the file and rebuild the normal APK afterwards. For the network-permission sandbox run, use `SandboxIntegrationTest` with `expectInternet=true` and a temporary debug Manifest permission, then remove it. See the step verification records for details.
 
