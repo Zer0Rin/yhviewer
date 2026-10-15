@@ -28,9 +28,19 @@ YHViewer treats every file as **untrusted content**. It opens it in a locked-dow
 
 - **Open from anywhere**: "Open with" from compatible file managers, "Share" from other apps, or the built-in picker.
 - **Sandboxed rendering**: no network, no file system access, no JS bridge. External links only open on a real user tap (see [Security model](#security-model)).
-- **Markdown support**: rendered by markdown-it with syntax highlighting, light/dark themes and an offline bundle. Raw HTML inside Markdown is escaped.
+- **Markdown support**: rendered by markdown-it with syntax highlighting, Paper / Ink / Terminal themes, a system-following option and an offline bundle. Raw HTML inside Markdown is escaped.
 - **Shelf**: recent files, favorites and search. Files are copied on import, so they stay readable after the source is deleted or the app restarts.
 - **Lightweight**: uses the system WebView, no bundled browser engine, and the APK declares **no `INTERNET` permission**.
+
+## Reading themes
+
+Markdown documents have an **Aa** menu: Paper (light), Ink (dark), Terminal, or Follow system. The choice is saved locally. Switching themes updates the existing page without reloading or losing its scroll position; code highlighting uses the same theme variables. HTML documents retain their original appearance and do not show this menu.
+
+| Paper | Ink | Terminal |
+|---|---|---|
+| ![](docs/screenshots/theme-paper.png) | ![](docs/screenshots/theme-ink.png) | ![](docs/screenshots/theme-terminal.png) |
+
+Native API 37 captures of the same test document, with the system in light mode. The app bar still follows the system theme.
 
 ## Security model
 
@@ -100,7 +110,7 @@ flowchart TB
 
 ## Testing
 
-**15 JVM tests + 25 instrumented tests**, plus a self-checking sandbox page.
+**21 JVM tests + 30 instrumented tests**, plus a self-checking sandbox page.
 
 GitHub Actions runs JVM tests, lint and a debug build on pushes and pull requests. Pushes to `main` and manual runs also run the instrumented suite on an API 34 emulator. Test reports and the debug APK are available as workflow artifacts (14-day retention). The temporary-network-permission sandbox round remains a separate acceptance check.
 
@@ -109,19 +119,23 @@ Step-by-step verification logs: [docs/verification/](docs/verification/), includ
 | Suite | Type | Count | Covers |
 |---|---|---:|---|
 | `MarkdownRendererTest` | JVM | 10 | JSON/script escaping, closing tags and comments, quotes, controls, Unicode and literal replacement |
+| `ReaderThemeTest` | JVM | 6 | Theme IDs/fallback, initial theme, default auto and placeholder text preserved in Markdown |
 | `EscapeLikeTest` | JVM | 4 | Literal LIKE wildcards and backslash ordering |
 | `ExampleUnitTest` | JVM | 1 | Generated arithmetic smoke test |
 | `ShelfDaoTest` | Instrumented | 7 | In-memory Room: sorting, case-insensitive search, literal `%`/`_`, favorites, timestamps and unique source URI |
 | `ShelfRepositoryTest` | Instrumented | 7 | Temporary storage: import/open, source refresh, source deletion, timestamps, atomic files, removal and missing-copy error |
 | `ShelfUiTest` | Instrumented | 2 | Shelf sorting/search/favorites, cancel/confirm deletion, Activity recreation without re-import, local-copy reading and layered back handling |
+| `ReaderThemeIntegrationTest` | Instrumented | 5 | All menu choices, same WebView/document and scroll offset, highlight colors, system mode, new ViewModel persistence, MD-only controls, initial-load race and native/JS whitelists |
 | `ReaderIntegrationTest` | Instrumented | 3 | `ACTION_VIEW` / `ACTION_SEND`, same Activity reuse, Markdown raw-HTML safety, fresh document history, real-link back navigation and the 20 MiB limit |
 | `SandboxIntegrationTest` | Instrumented | 3 | Nine page checks and storage re-open, automatic vs user navigation, independent 403 callback checks and iframe CSP events |
 | `MarkdownRenderingIntegrationTest` | Instrumented | 2 | Rendering structure, highlighting/colors, JSON round trip, script safety, remote-image CSP, wide-table scrolling, browser handoff and library/fallback build variants |
 | `ExampleInstrumentedTest` | Instrumented | 1 | Generated application-context/package smoke test |
 
-The **40 tests include the two generated smoke tests**. Re-running a case in dark mode, with a missing library, or with temporary network permission does not add another test to this count. Last full run: **15 JVM + 25 instrumented, zero failures or skips**, on an API 37 emulator.
+The **51 tests include the two generated smoke tests**. Re-running a case in dark mode, with a missing library, or with temporary network permission does not add another test to this count. Last full run: **21 JVM + 30 instrumented, zero failures or skips**, on an API 37 emulator.
 
-The process-death check was also performed outside instrumentation: import a dedicated file, `am force-stop` the app, delete that original file, cold-start, then open the shelf copy. Database identity and copied bytes were checked before and after. See [MVP verification](docs/verification/STEP5_VERIFICATION.md).
+The theme choice was also checked across a real process stop and cold start; see [reader theme verification](docs/verification/READER_THEMES.md).
+
+The shelf process-death check was also performed outside instrumentation: import a dedicated file, `am force-stop` the app, delete that original file, cold-start, then open the shelf copy. Database identity and copied bytes were checked before and after. See [MVP verification](docs/verification/STEP5_VERIFICATION.md).
 
 ### Sandbox verification
 
@@ -169,8 +183,9 @@ app/src/main/
 │   ├── Shelf.kt               # Room entity, DAO, database
 │   ├── DocumentLoader.kt      # content:// → text, type detection
 │   ├── SandboxWebView.kt      # the four-layer sandbox
-│   └── MarkdownRenderer.kt    # safe MD → template injection
-├── assets/md/                 # template.html, markdown-it, highlight.js, themes
+│   ├── MarkdownRenderer.kt    # safe MD → template injection
+│   └── ReaderTheme.kt          # Markdown theme IDs and saved selection
+├── assets/md/                 # template.html, markdown-it, highlight.js, CSS-variable themes
 └── AndroidManifest.xml        # no INTERNET permission
 app/schemas/                   # exported Room schema (v1)
 ```
@@ -178,7 +193,7 @@ app/schemas/                   # exported Room schema (v1)
 ## Limitations & roadmap
 
 - [ ] **Per-document "allow network" toggle** so CDN-based charts can render, opt-in per file
-- [ ] **Reading themes** ("light touch" mode): font, size, width and accent, reusing the template's CSS variables
+- [ ] **Reading controls**: adjustable font, size, width and accent on top of the preset themes
 - [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
 - [ ] Content-hash dedupe across providers; orphan-file cleanup on startup
 - [ ] Optional KaTeX / Mermaid modules (kept out of the core to stay lightweight)

@@ -36,6 +36,15 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ShelfRepository(app, AppDatabase.get(app))
 
+    private val themeStore = ThemeStore(app)
+    var theme by mutableStateOf(themeStore.load())
+        private set
+
+    fun selectTheme(theme: ReaderTheme) {
+        this.theme = theme
+        themeStore.save(theme)
+    }
+
     // ---- 书架 ----
     // 输入框状态用 Compose state（不用 StateFlow），避免输入法光标跳动的已知问题
     var query by mutableStateOf("")

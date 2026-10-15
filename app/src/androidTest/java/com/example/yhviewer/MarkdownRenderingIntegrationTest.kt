@@ -67,7 +67,7 @@ class MarkdownRenderingIntegrationTest {
         assertEquals(dark.toString(), js("matchMedia('(prefers-color-scheme: dark)').matches"))
         val keyword = js("getComputedStyle(document.querySelector('pre.hljs .hljs-keyword')).color")
         android.util.Log.i("MarkdownTest", "dark=$dark keyword=$keyword")
-        assertEquals(if (dark) "\"rgb(255, 123, 114)\"" else "\"rgb(215, 58, 73)\"", keyword)
+        assertEquals(if (dark) "\"rgb(229, 143, 180)\"" else "\"rgb(162, 65, 107)\"", keyword)
         val monitor = Instrumentation.ActivityMonitor(IntentFilter(Intent.ACTION_VIEW).apply {
             addCategory(Intent.CATEGORY_BROWSABLE); addDataScheme("https")
         }, Instrumentation.ActivityResult(0,null), true)

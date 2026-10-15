@@ -4,15 +4,12 @@ import android.content.Context
 
 /**
  * md → 可显示的 HTML 页面。
- *
- * 思路：Kotlin 不解析 Markdown，只把原文安全地塞进 assets/md/template.html，
- * 真正的渲染交给页面里的 markdown-it（在沙箱 WebView 里执行）。
- *
- * 渲染函数是纯 Kotlin（不碰 Android API），所以能在 JVM 单元测试里直接测。
+ * Kotlin 只做两次字面量替换：主题 id、Markdown 原文（JSON 编码）。渲染交给页面里的 markdown-it。
  */
 object MarkdownRenderer {
     private const val TEMPLATE_PATH = "md/template.html"
     const val PLACEHOLDER = "/*MD_JSON*/"
+    const val THEME_PLACEHOLDER = "__THEME__"
 
     @Volatile
     private var cachedTemplate: String? = null
@@ -23,16 +20,17 @@ object MarkdownRenderer {
             .use { it.readText() }
             .also { cachedTemplate = it }
 
-    fun render(markdown: String, template: String): String {
+    fun render(markdown: String, template: String, theme: ReaderTheme = ReaderTheme.AUTO): String {
         require(PLACEHOLDER in template) { "template is missing $PLACEHOLDER" }
-        return template.replace(PLACEHOLDER, toJsonString(markdown)) // 字面量替换，不是正则
+        // 顺序很重要：先替换主题，再塞入用户内容。
+        // 反过来的话，文档里恰好写了 "__THEME__" 也会被替换掉，用户内容就被篡改了。
+        // theme.id 来自枚举（白名单），不可能注入任意字符串。
+        return template
+            .replace(THEME_PLACEHOLDER, theme.id)
+            .replace(PLACEHOLDER, toJsonString(markdown))
     }
 
-    /**
-     * 把任意文本编码成 JSON 字符串字面量，并且能安全放进 <script> 标签：
-     * 所有 "<" 都编码为 \u003c，所以 "</script>" "<!--" 都没法提前闭合标签。
-     * 不用 org.json 是因为它在 JVM 单元测试里是空桩。
-     */
+    /** Escape every '<' so untrusted Markdown cannot close its script data block. */
     internal fun toJsonString(s: String): String = buildString(s.length + 16) {
         append('"')
         for (c in s) {

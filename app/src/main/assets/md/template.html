@@ -1,55 +1,130 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh" data-theme="__THEME__">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Markdown</title>
-  <!-- 代码高亮主题：跟随系统深浅色。路径对应 app/src/main/assets/md/ -->
-  <link rel="stylesheet" href="/assets/md/github.min.css" media="(prefers-color-scheme: light)">
-  <link rel="stylesheet" href="/assets/md/github-dark.min.css" media="(prefers-color-scheme: dark)">
   <style>
-    /* 默认阅读主题：全部用 CSS 变量，以后"轻调"档直接复用、覆盖这些变量即可 */
+    /* ================================================================
+       主题系统：每个主题 = 一组 CSS 变量（+ 终端主题额外的结构样式）
+       data-theme: auto | paper | ink | terminal
+       未知值一律按 auto 处理（浅色 paper / 深色 ink 跟随系统）
+       ================================================================ */
+
     :root {
-      color-scheme: light dark;
-      --bg: #fbfaf7; --fg: #1f2328; --muted: #656d76; --border: #d8dee4;
-      --code-bg: #f2f1ec; --accent: #2f6fd8; --quote: #8a8f98;
-      --font: system-ui, -apple-system, "Noto Sans SC", sans-serif;
-      --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
-      --size: 16px; --line: 1.75; --width: 760px;
+      --font-sans: system-ui, -apple-system, "Noto Sans SC", sans-serif;
+      --font-serif: "Noto Serif SC", "Source Han Serif SC", "Noto Serif", Georgia, serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "Droid Sans Mono", Menlo, monospace;
+      --width: 760px;
+
+      /* ---- Paper：暖白纸张（默认 / auto 浅色） ---- */
+      color-scheme: light;
+      --bg: #faf9f5; --fg: #2b2a27; --muted: #75736c; --border: #e6e3d9;
+      --heading: #1f1e1b; --strong: #1f1e1b;
+      --accent: #c4633f; --link: #b5532f; --marker: #c4633f; --quote: #75736c;
+      --code-bg: #f0eee6; --code-fg: #3d3a35; --inline-code: #a8452a;
+      --font-body: var(--font-serif); --size: 17px; --line: 1.75;
+      --hl-keyword: #a2416b; --hl-string: #4f7a28; --hl-number: #b35d1e; --hl-comment: #9a978d;
+      --hl-title: #3e63a8; --hl-type: #8a5a00; --hl-attr: #7a4fb5;
     }
+
+    /* ---- Ink：暖黑墨色（auto 深色） ---- */
     @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #16171a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #30343a;
-        --code-bg: #22252b; --accent: #7aa2ff; --quote: #8b929c;
+      :root:not([data-theme="paper"]) {
+        color-scheme: dark;
+        --bg: #262624; --fg: #e8e5dc; --muted: #a29f96; --border: #3b3a36;
+        --heading: #f5f3ec; --strong: #f5f3ec;
+        --accent: #d97757; --link: #e08a6c; --marker: #d97757; --quote: #a29f96;
+        --code-bg: #30302d; --code-fg: #e8e5dc; --inline-code: #e8957a;
+        --hl-keyword: #e58fb4; --hl-string: #a8cc7c; --hl-number: #e8a063; --hl-comment: #7d7a72;
+        --hl-title: #8db4f2; --hl-type: #e6c176; --hl-attr: #c3a1f0;
       }
     }
+    :root[data-theme="ink"] {
+      color-scheme: dark;
+      --bg: #262624; --fg: #e8e5dc; --muted: #a29f96; --border: #3b3a36;
+      --heading: #f5f3ec; --strong: #f5f3ec;
+      --accent: #d97757; --link: #e08a6c; --marker: #d97757; --quote: #a29f96;
+      --code-bg: #30302d; --code-fg: #e8e5dc; --inline-code: #e8957a;
+      --hl-keyword: #e58fb4; --hl-string: #a8cc7c; --hl-number: #e8a063; --hl-comment: #7d7a72;
+      --hl-title: #8db4f2; --hl-type: #e6c176; --hl-attr: #c3a1f0;
+    }
+
+    /* ---- Terminal：深青终端风（放在最后，覆盖上面的 auto 规则） ---- */
+    :root[data-theme="terminal"] {
+      color-scheme: dark;
+      --bg: #1d2a32; --fg: #d3dae0; --muted: #7f929e; --border: #2e3e48;
+      --heading: #e9a23b; --strong: #ffffff;
+      --accent: #e9a23b; --link: #7cb7ec; --marker: #7f929e; --quote: #8fa3ae;
+      --code-bg: #172229; --code-fg: #d3dae0; --inline-code: #b392f0;
+      --font-body: var(--font-mono); --size: 14px; --line: 1.6; --width: none;
+      --hl-keyword: #c792ea; --hl-string: #a5d6a7; --hl-number: #f78c6c; --hl-comment: #5f7480;
+      --hl-title: #82aaff; --hl-type: #ffcb6b; --hl-attr: #e9a23b;
+    }
+
+    /* ================= 通用排版（所有主题共用，只读变量） ================= */
     html { background: var(--bg); }
     body {
       margin: 0 auto; max-width: var(--width); padding: 16px 18px 48px;
-      color: var(--fg); font: var(--size)/var(--line) var(--font);
-      word-wrap: break-word;
+      color: var(--fg); font: var(--size)/var(--line) var(--font-body);
+      word-wrap: break-word; -webkit-text-size-adjust: 100%;
     }
-    h1, h2, h3, h4 { line-height: 1.3; margin: 1.6em 0 .6em; }
-    h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
-    h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
-    h3 { font-size: 1.15em; }
-    body > :first-child { margin-top: 0; }
-    a { color: var(--accent); text-decoration: none; }
+    h1, h2, h3, h4, h5, h6 { color: var(--heading); line-height: 1.3; margin: 1.6em 0 .6em; font-weight: 650; }
+    h1 { font-size: 1.65em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+    h2 { font-size: 1.3em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+    h3 { font-size: 1.12em; }
+    body > :first-child, main > :first-child { margin-top: 0; }
+    strong { color: var(--strong); font-weight: 700; }
+    a { color: var(--link); text-decoration: none; }
     a:active { text-decoration: underline; }
-    code { font-family: var(--mono); font-size: .88em; background: var(--code-bg);
-           padding: .15em .35em; border-radius: 4px; }
+    li::marker { color: var(--marker); }
+    code { font-family: var(--font-mono); font-size: .86em; color: var(--inline-code);
+           background: var(--code-bg); padding: .12em .36em; border-radius: 4px; }
     pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px;
           overflow-x: auto; line-height: 1.5; }
-    pre code { background: none; padding: 0; font-size: .85em; }
-    pre.hljs { background: var(--code-bg); }   /* 统一背景，别让高亮主题自带的底色抢戏 */
-    blockquote { margin: 1em 0; padding: 0 1em; color: var(--quote);
-                 border-left: 3px solid var(--border); }
+    pre code { color: var(--code-fg); background: none; padding: 0; font-size: .84em; }
+    blockquote { margin: 1em 0; padding: 0 1em; color: var(--quote); border-left: 3px solid var(--accent); }
     table { display: block; overflow-x: auto; border-collapse: collapse; margin: 1em 0; }
     th, td { border: 1px solid var(--border); padding: 6px 10px; }
-    th { background: var(--code-bg); }
+    th { background: var(--code-bg); color: var(--heading); }
     img { max-width: 100%; }
     hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+    ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     .fallback-note { color: var(--muted); font-size: .9em; }
+
+    /* ================= 代码高亮：用主题变量着色，不再依赖外部主题 CSS ================= */
+    .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: var(--hl-keyword); }
+    .hljs-string, .hljs-regexp, .hljs-template-string, .hljs-addition { color: var(--hl-string); }
+    .hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
+    .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+    .hljs-title, .hljs-section, .hljs-name { color: var(--hl-title); }
+    .hljs-type, .hljs-built_in, .hljs-title.class_ { color: var(--hl-type); }
+    .hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable { color: var(--hl-attr); }
+    .hljs-meta { color: var(--hl-comment); }
+
+    /* ================= Terminal 结构样式：把 Markdown 标记"显示出来" ================= */
+    [data-theme="terminal"] h1, [data-theme="terminal"] h2, [data-theme="terminal"] h3,
+    [data-theme="terminal"] h4, [data-theme="terminal"] h5, [data-theme="terminal"] h6 {
+      font-size: 1em; font-weight: 700; border: 0; padding: 0; margin: 1.5em 0 .9em;
+    }
+    [data-theme="terminal"] h1::before { content: "# "; }
+    [data-theme="terminal"] h2::before { content: "## "; }
+    [data-theme="terminal"] h3::before { content: "### "; }
+    [data-theme="terminal"] h4::before { content: "#### "; }
+    [data-theme="terminal"] h5::before { content: "##### "; }
+    [data-theme="terminal"] h6::before { content: "###### "; }
+    [data-theme="terminal"] ul { list-style: none; padding-left: 1.4em; }
+    [data-theme="terminal"] ul > li { position: relative; }
+    [data-theme="terminal"] ul > li::before { content: "-"; position: absolute; left: -1.2em; color: var(--marker); }
+    [data-theme="terminal"] ol { padding-left: 2em; }
+    [data-theme="terminal"] code { background: none; padding: 0; font-size: 1em; border-radius: 0; }
+    [data-theme="terminal"] pre { border-radius: 0; border-left: 2px solid var(--border); }
+    [data-theme="terminal"] pre code { font-size: 1em; }
+    [data-theme="terminal"] a { text-decoration: underline; text-underline-offset: 3px; }
+    [data-theme="terminal"] blockquote { border-left: 0; padding-left: 1.4em; position: relative; }
+    [data-theme="terminal"] blockquote::before { content: ">"; position: absolute; left: 0; color: var(--marker); }
+    [data-theme="terminal"] th { background: none; }
+    [data-theme="terminal"] hr { border-top-style: dashed; }
   </style>
 </head>
 <body>
@@ -61,11 +136,20 @@
   <script src="/assets/md/markdown-it.min.js"></script>
   <script src="/assets/md/highlight.min.js"></script>
   <script>
+    // 供 Kotlin 通过 evaluateJavascript 实时切换主题（白名单，不接受任意字符串）
+    window.setTheme = function (t) {
+      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) {
+        const x = window.scrollX, y = window.scrollY;
+        document.documentElement.setAttribute('data-theme', t);
+        // Changing fonts reflows content; preserve the current pixel offset.
+        window.scrollTo(x, y);
+      }
+    };
+
     (function () {
       const src = JSON.parse(document.getElementById('md-src').textContent);
       const out = document.getElementById('content');
 
-      // 库没加载上（比如文件忘了放）：退回纯文本，至少能读
       if (!window.markdownit) {
         const note = document.createElement('p');
         note.className = 'fallback-note';
@@ -77,8 +161,8 @@
       }
 
       const md = window.markdownit({
-        html: false,      // 关键：md 里的原始 HTML（含 <script>）一律转义成文本
-        linkify: true,    // 裸网址自动变链接
+        html: false,
+        linkify: true,
         typographer: false,
         highlight(code, lang) {
           if (window.hljs && lang && hljs.getLanguage(lang)) {
@@ -88,13 +172,12 @@
                 '</code></pre>';
             } catch (_) { /* 落到默认渲染 */ }
           }
-          return ''; // 返回空串 = 用 markdown-it 默认的转义渲染
+          return '';
         },
       });
 
       out.innerHTML = md.render(src);
 
-      // 用第一个标题当页面标题
       const h = out.querySelector('h1, h2');
       if (h) document.title = h.textContent;
     })();

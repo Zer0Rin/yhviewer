@@ -15,6 +15,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +77,7 @@ private class SandboxClient(
     private val loader: WebViewAssetLoader,
     private val onHistoryChanged: (Boolean) -> Unit,
     private val onExternalLink: (Uri) -> Unit,
+    private val onPageReady: (WebView) -> Unit,
 ) : WebViewClient() {
 
     // 注意：这个方法跑在后台线程，不能直接改 Compose 状态
@@ -102,6 +105,11 @@ private class SandboxClient(
             Log.w(Sandbox.TAG, "blocked navigation: $url (gesture=${request.hasGesture()})")
         }
         return true
+    }
+
+    override fun onPageFinished(view: WebView, url: String?) {
+        super.onPageFinished(view, url)
+        if (url == Sandbox.DOC_URL) onPageReady(view)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
@@ -136,11 +144,22 @@ private fun openExternal(context: Context, uri: Uri) {
     }
 }
 
-/** 替换 MainActivity 里原来的 HtmlView，签名不变，ReaderApp 不用改 */
+private fun WebView.applyReaderTheme(theme: String?) {
+    // Validate at the native boundary too; never interpolate arbitrary JS input.
+    val id = ReaderTheme.entries.firstOrNull { it.id == theme }?.id ?: return
+    evaluateJavascript("window.setTheme && window.setTheme(${MarkdownRenderer.toJsonString(id)})", null)
+}
+
+/** A document keeps its WebView while its Markdown theme changes. */
 @Composable
-fun HtmlView(html: String, modifier: Modifier = Modifier) {
+fun HtmlView(html: String, modifier: Modifier = Modifier, theme: String? = null) {
+    val currentTheme by rememberUpdatedState(theme)
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+
+    LaunchedEffect(theme, webView) {
+        webView?.applyReaderTheme(theme)
+    }
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
 
@@ -163,11 +182,12 @@ fun HtmlView(html: String, modifier: Modifier = Modifier) {
                     loader = loader,
                     onHistoryChanged = { canGoBack = it },
                     onExternalLink = { uri -> openExternal(context, uri) },
+                    onPageReady = { view -> view.applyReaderTheme(currentTheme) },
                 )
                 loadUrl(Sandbox.DOC_URL)
                 webView = this
             }
         },
-        onRelease = { it.destroy() },
+        onRelease = { webView = null; it.destroy() },
     )
 }

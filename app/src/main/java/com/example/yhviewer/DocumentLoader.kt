@@ -65,9 +65,9 @@ object DocumentLoader {
  * 转成 WebView 能显示的 HTML。
  * HTML 原样显示；Markdown 使用本地渲染模板；未知类型仍以转义后的纯文本显示。
  */
-fun LoadedDoc.toDisplayHtml(context: Context): String = when (type) {
+fun LoadedDoc.toDisplayHtml(context: Context, theme: ReaderTheme = ReaderTheme.AUTO): String = when (type) {
     DocType.HTML -> text
-    DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context))
+    DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
     DocType.UNKNOWN -> """
         <!doctype html>
         <meta charset="utf-8">
