@@ -13,7 +13,7 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|---|---|---|---|
 | ![](docs/screenshots/shelf.png) | ![](docs/screenshots/html.png) | ![](docs/screenshots/markdown.png) | ![](docs/screenshots/code.png) | ![](docs/screenshots/epub.png) | ![](docs/screenshots/sandbox.png) |
 
-**[Releases](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds a signed R8 APK, checks its final permissions and smoke-tests startup before publishing. The first official release is pending signing setup and real-device smoke testing; see [RELEASE.md](RELEASE.md) and [release preparation evidence](docs/verification/RELEASE_PREPARATION.md).
+**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds a signed R8 APK, checks its final permissions and smoke-tests startup before publishing. See [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 
@@ -109,7 +109,7 @@ flowchart TB
 
 ## Testing
 
-**76 JVM tests + 43 instrumented tests** (including two generated smoke tests). CI runs the device suite on **API 34**; local acceptance uses **API 37**. Reports and debug APKs are retained as CI artifacts for 14 days.
+**76 JVM tests + 43 instrumented tests** (including two generated smoke tests). CI runs the device suite on **API 34**; local acceptance uses **API 37**. The officially signed R8 build was also smoke-tested on a physical **API 35** device. Reports and debug APKs are retained as CI artifacts for 14 days.
 
 | Area | Type | Covers |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 当前准备版本：`0.2.0`（versionCode `3`），正式 applicationId：`io.github.zer0rin.yhviewer`。
 
-发布工作流已接入；正式密钥、GitHub Secrets、真机 release 冒烟和首次 tag 发布尚待完成。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
+正式密钥和 GitHub Secrets 已配置，签名 R8 包已完成 API 35 真机冒烟；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。推送版本 tag 才会触发发布工作流。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
 
 ## 一次性准备
 
@@ -77,7 +77,7 @@ adb -s SERIAL install -r app/build/outputs/apk/release/app-release.apk
 - [ ] 最终 release APK 通过版本、applicationId、签名和无 INTERNET 权限检查
 - [ ] 后续版本：使用相同正式密钥覆盖安装上一正式版本，书架/收藏/进度保留
 
-当前只连接了 API 37 模拟器；模拟器检查不能替代真机项。旧版本到新版本的 Room 迁移测试也不能证明不同 applicationId 之间的数据迁移。
+本版本已在 Redmi 23049RAD8C / API 35 真机完成格式、安全和副本重启冒烟。后续发布仍需重复真机清单；模拟器检查不能替代真机项。旧版本到新版本的 Room 迁移测试也不能证明不同 applicationId 之间的数据迁移。
 
 ## 正式发布
 
