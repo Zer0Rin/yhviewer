@@ -5,6 +5,16 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Missing all signing variables permits an unsigned local build. Partial configuration
+// fails explicitly rather than silently producing an unsigned release.
+val signingNames = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")
+val signingValues = signingNames.associateWith { providers.environmentVariable(it).orNull }
+val hasReleaseSigning = signingValues.values.any { !it.isNullOrBlank() }
+if (hasReleaseSigning) {
+    val missing = signingNames.filter { signingValues[it].isNullOrBlank() }
+    require(missing.isEmpty()) { "Incomplete release signing: missing ${missing.joinToString()}" }
+}
+
 android {
     namespace = "com.example.yhviewer"
     compileSdk {
@@ -12,20 +22,33 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.yhviewer"
+        applicationId = "io.github.zer0rin.yhviewer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(signingValues.getValue("SIGNING_STORE_FILE")!!)
+                storePassword = signingValues.getValue("SIGNING_STORE_PASSWORD")
+                keyAlias = signingValues.getValue("SIGNING_KEY_ALIAS")
+                keyPassword = signingValues.getValue("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // Optimize the full program: partial packageScope repackaged a Kotlin
+                // subclass away from its package-private superclass and crashed startup.
             }
         }
     }

@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25 # 和 ci.yml 保持一致
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install compile SDK and verification tools
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-configuration-cache --stacktrace
+
+      # 防手误：tag 必须等于 "v" + versionName，否则不发布
+      - name: Check tag matches versionName
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Expected vMAJOR.MINOR.PATCH"; exit 1; }
+          TAG="${GITHUB_REF_NAME#v}"
+          NAME=$(grep -E '^\s*versionName\s*=' app/build.gradle.kts | sed -E 's/.*"(.*)".*/\1/')
+          echo "tag=$TAG versionName=$NAME"
+          if [ "$TAG" != "$NAME" ]; then
+            echo "::error::tag v$TAG 与 versionName $NAME 不一致"
+            exit 1
+          fi
+
+      # 签名密钥只存在 GitHub Secrets 里，运行时解码到临时目录，任务结束即销毁
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then echo "::error::Missing $name; see RELEASE.md"; exit 1; fi
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Signed release build
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-configuration-cache --stacktrace
+
+      # 发布前的两道门：签名有效；APK 里没有联网权限
+      # （依赖库可能通过 Manifest 合并偷偷带进 INTERNET，所以检查最终产物，而不是源码里的 Manifest）
+      - name: Verify APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          scripts/verify-release.sh "$APK" "$GITHUB_REF_NAME" io.github.zer0rin.yhviewer
+          cp "$APK" "yhviewer-${GITHUB_REF_NAME}.apk"
+          sha256sum "yhviewer-${GITHUB_REF_NAME}.apk" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Debug tests cannot detect optimizer-only startup failures.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Smoke optimized release on API 34
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
+          script: python3 scripts/smoke-release.py app/build/outputs/apk/release/app-release.apk
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "yhviewer-${GITHUB_REF_NAME}.apk" SHA256SUMS.txt \
+            --title "YHViewer $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
