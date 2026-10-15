@@ -4,36 +4,18 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.core.content.IntentCompat
 import com.example.yhviewer.ui.theme.YHViewerTheme
 
@@ -44,8 +26,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // 只在首次创建时处理启动 Intent：旋转屏幕重建 Activity 时 intent 还是同一个，
-        // 不加这个判断会重复导入、并把用户从书架强行拉回阅读页
         if (savedInstanceState == null) {
             extractUri(intent)?.let(vm::importAndOpen)
         }
@@ -57,6 +37,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         extractUri(intent)?.let(vm::importAndOpen)
+    }
+
+    // 进入后台时立刻保存阅读位置：之后进程可能随时被系统回收
+    override fun onStop() {
+        super.onStop()
+        vm.flushPosition()
     }
 
     private fun extractUri(intent: Intent?): Uri? = when (intent?.action) {
@@ -74,62 +60,6 @@ fun AppRoot(vm: ShelfViewModel) {
     when (vm.screen) {
         Screen.Shelf -> ShelfScreen(vm, onOpenFile = { picker.launch(arrayOf("*/*")) })
         Screen.Reader -> ReaderScreen(vm)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ReaderScreen(vm: ShelfViewModel) {
-    val context = LocalContext.current
-    val state = vm.reader
-    var menuOpen by remember(state) { mutableStateOf(false) }
-
-    // 先注册的 BackHandler 优先级低：网页能后退时 HtmlView 里的那个先处理，退到头才回书架
-    BackHandler { vm.backToShelf() }
-
-    val title = (state as? ReaderState.Ready)?.doc?.name ?: ""
-
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
-                actions = {
-                    if ((state as? ReaderState.Ready)?.doc?.type == DocType.MARKDOWN) {
-                        Box {
-                            TextButton(
-                                onClick = { menuOpen = true },
-                                modifier = Modifier.semantics { contentDescription = "阅读主题" },
-                            ) { Text("Aa") }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                ReaderTheme.entries.forEach { theme ->
-                                    DropdownMenuItem(
-                                        text = { Text((if (theme == vm.theme) "✓ " else "    ") + theme.label) },
-                                        onClick = { vm.selectTheme(theme); menuOpen = false },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        val m = Modifier.padding(padding).fillMaxSize()
-        when (state) {
-            ReaderState.Loading -> Box(m, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            is ReaderState.Error -> CenterText("打开失败：${state.message}", m)
-            is ReaderState.Ready -> key(state.doc) {
-                // Theme changes update the live page, not this HTML or the WebView key.
-                val html = remember(state.doc) { state.doc.toDisplayHtml(context, vm.theme) }
-                HtmlView(
-                    html = html,
-                    modifier = m,
-                    theme = vm.theme.id.takeIf { state.doc.type == DocType.MARKDOWN },
-                )
-            }
-        }
     }
 }
 

@@ -135,7 +135,10 @@ class ShelfUiTest {
                 waitText("rotation-copy.html")
                 compose.waitUntil(20_000) { js(scenario,"document.querySelector('h1')?.textContent") == "\"Offline\"" }
                 val after = runBlocking { dao.findBySource(uri.toString())!! }
-                assertEquals(before,after)
+                // Backgrounding now saves progress. Every import/identity field must stay unchanged.
+                assertEquals(before, after.copy(locator = before.locator, progress = before.progress))
+                assertEquals(Locator.START, Locator.decode(after.locator))
+                assertEquals(0f, after.progress, 0f)
                 assertEquals(1,runBlocking { dao.observe("",false).first().count { it.sourceUri==uri.toString() } })
                 androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(WebView::class.java)).perform(androidx.test.espresso.action.ViewActions.click())
                 compose.waitUntil(10_000) { js(scenario,"location.hash") == "\"#section\"" }
@@ -145,6 +148,7 @@ class ShelfUiTest {
                 compose.onAllNodesWithText("书架").assertCountEquals(0)
                 scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
                 waitText("书架")
+                waitText("rotation-copy.html")
                 compose.onNodeWithText("rotation-copy.html").performClick()
                 compose.waitUntil(20_000) { js(scenario,"document.querySelector('h1')?.textContent") == "\"Offline\"" }
                 scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }

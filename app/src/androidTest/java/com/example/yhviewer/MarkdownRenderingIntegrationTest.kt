@@ -46,7 +46,7 @@ class MarkdownRenderingIntegrationTest {
     private fun load(markdown: String) {
         val template = MarkdownRenderer.template(compose.activity).replace("<head>", "<head><script>window.__alerts=[];window.alert=x=>window.__alerts.push(x);window.__imageBlocked=false;document.addEventListener('securitypolicyviolation',e=>{if(e.effectiveDirective==='img-src')window.__imageBlocked=true});</script>")
         val html = MarkdownRenderer.render(markdown, template)
-        compose.runOnUiThread { compose.activity.setContent { YHViewerTheme { HtmlView(html, Modifier.fillMaxSize()) } } }
+        compose.runOnUiThread { compose.activity.setContent { YHViewerTheme { HtmlView(PageSource.Html(html), Modifier.fillMaxSize()) } } }
         compose.waitUntil(25_000) { js("document.readyState") == "\"complete\"" && js("!!document.querySelector('#content')?.textContent") == "true" }
     }
 

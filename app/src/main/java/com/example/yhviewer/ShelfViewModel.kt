@@ -1,8 +1,11 @@
 package com.example.yhviewer
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -11,6 +14,14 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -24,39 +35,42 @@ sealed interface Screen {
 
 sealed interface ReaderState {
     data object Loading : ReaderState
-    data class Ready(val doc: LoadedDoc) : ReaderState
+    data class Ready(val doc: OpenedDoc) : ReaderState
     data class Error(val message: String) : ReaderState
 }
 
-/**
- * ViewModel 活得比 Activity 长：旋转屏幕时 Activity 重建，这里的状态不丢。
- * 类比后端：Activity 像一次请求，ViewModel 像会话。
- */
 class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ShelfRepository(app, AppDatabase.get(app))
-
     private val themeStore = ThemeStore(app)
-    var theme by mutableStateOf(themeStore.load())
-        private set
+    private val prefs = app.getSharedPreferences("reader_prefs", Context.MODE_PRIVATE)
 
-    fun selectTheme(theme: ReaderTheme) {
-        this.theme = theme
-        themeStore.save(theme)
+    /** 启动时先清理孤儿文件；导入要等它做完，避免误删正在写入的新副本 */
+    private val startup = viewModelScope.async {
+        try { repo.cleanOrphans(); null }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { e }
     }
 
-    // ---- 书架 ----
-    // 输入框状态用 Compose state（不用 StateFlow），避免输入法光标跳动的已知问题
+    // ---------------- 偏好 ----------------
+    var theme by mutableStateOf(themeStore.load())
+        private set
+    var wrap by mutableStateOf(prefs.getBoolean(KEY_WRAP, false))
+        private set
+
+    fun selectTheme(t: ReaderTheme) { theme = t; themeStore.save(t) }
+    fun toggleWrap() { wrap = !wrap; prefs.edit().putBoolean(KEY_WRAP, wrap).apply() }
+
+    // ---------------- 书架 ----------------
     var query by mutableStateOf("")
         private set
     var favoritesOnly by mutableStateOf(false)
         private set
 
-    /** null = 数据库还没返回第一批数据（区分"加载中"和"真的是空书架"，避免空状态闪一下） */
     @OptIn(ExperimentalCoroutinesApi::class)
     val books: StateFlow<List<Book>?> =
         snapshotFlow { query to favoritesOnly }
-            .flatMapLatest { (q, fav) -> repo.observe(q, fav) } // 条件一变，自动切换到新查询
+            .flatMapLatest { (q, fav) -> repo.observe(q, fav) }
             .stateIn<List<Book>?>(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun updateQuery(q: String) { query = q }
@@ -64,32 +78,126 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleFavorite(book: Book) { viewModelScope.launch { repo.setFavorite(book.id, !book.favorite) } }
     fun delete(book: Book) { viewModelScope.launch { repo.delete(book.id) } }
 
-    // ---- 导航 + 阅读 ----
+    // ---------------- 导航 + 阅读 ----------------
     var screen by mutableStateOf<Screen>(Screen.Shelf)
         private set
     var reader by mutableStateOf<ReaderState>(ReaderState.Loading)
         private set
+
+    /** 当前章节（单页文档恒为 0） */
+    var chapter by mutableIntStateOf(0)
+        private set
+
+    var documentSession by mutableIntStateOf(0)
+        private set
+    var chapterAnchor by mutableStateOf<String?>(null)
+        private set
+
+    // 最新滚动比例。刻意不用 Compose state：每次滚动都触发重组没有意义，只在切章或重建 WebView 时读一次
+    private var ratio = 0f
     private var loadJob: Job? = null
+    private var saveJob: Job? = null
+
+    fun initialRatio(): Float = ratio
 
     fun importAndOpen(uri: Uri) = load { repo.open(repo.import(uri)) }
     fun openBook(id: Long) = load { repo.open(id) }
 
-    fun backToShelf() {
+    private fun load(block: suspend () -> OpenedDoc) {
+        flushPosition() // 从一本直接跳到另一本时，先保存上一本的位置
         loadJob?.cancel()
-        screen = Screen.Shelf
-    }
-
-    private fun load(block: suspend () -> LoadedDoc) {
-        loadJob?.cancel() // 连续打开两个文件：只保留最后一次
         screen = Screen.Reader
         reader = ReaderState.Loading
+        documentSession++
+        chapterAnchor = null
         loadJob = viewModelScope.launch {
             reader = try {
-                ReaderState.Ready(block())
+                startup.await()?.let { throw it }
+                PositionWrites.awaitPending()
+                val doc = block()
+                chapter = doc.locator.chapter.coerceIn(0, doc.chapterCount - 1)
+                // 书变短了（重新导入）导致章节号被修正时，章内比例也作废
+                ratio = if (doc.locator.chapter == chapter) doc.locator.ratio else 0f
+                ReaderState.Ready(doc)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 ReaderState.Error(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * WebView 滚动回调。带上"这是哪一章的滚动"：切章瞬间旧 WebView 可能还会发一两个滚动事件，
+     * 不过滤的话会把旧章节的比例写到新章节上。
+     */
+    fun onScroll(forSession: Int, forChapter: Int, r: Float) {
+        if (forSession != documentSession || forChapter != chapter) return
+        val doc = current() ?: return
+        ratio = if (r.isFinite()) r.coerceIn(0f, 1f) else 0f
+        val locator = Locator(chapter, ratio)
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            delay(800) // 防抖：停止滚动 0.8 秒后才写库
+            PositionWrites.enqueue(repo, doc.bookId, locator, doc.chapterCount)
+        }
+    }
+
+    /** 立即保存（离开阅读页、切章、App 进入后台时调用） */
+    fun flushPosition() {
+        val doc = current() ?: return
+        saveJob?.cancel()
+        val locator = Locator(chapter, ratio)
+        PositionWrites.enqueue(repo, doc.bookId, locator, doc.chapterCount)
+    }
+
+    fun goToChapter(index: Int, anchor: String? = null) {
+        val doc = current() ?: return
+        if (index !in 0 until doc.chapterCount || index == chapter) return
+        chapterAnchor = anchor
+        chapter = index
+        ratio = 0f
+        flushPosition()
+    }
+
+    fun nextChapter() = goToChapter(chapter + 1)
+    fun prevChapter() = goToChapter(chapter - 1)
+
+    /** EPUB 内部链接：指向另一章就切过去；同一章（页内锚点）或不在目录里的文件交给 WebView */
+    fun onBookLink(path: String, fragment: String?): Boolean {
+        val doc = current() as? OpenedDoc.Epub ?: return false
+        val index = doc.chapters.indexOfFirst { it.path == path }
+        if (index < 0 || index == chapter) return false
+        goToChapter(index, fragment)
+        return true
+    }
+
+    fun backToShelf() {
+        flushPosition()
+        loadJob?.cancel()
+        screen = Screen.Shelf
+    }
+
+    private fun current(): OpenedDoc? =
+        if (screen == Screen.Reader) (reader as? ReaderState.Ready)?.doc else null
+
+    private companion object {
+        const val KEY_WRAP = "code_wrap"
+    }
+}
+
+// App-lifetime ordered writes: onStop/back saves must outlive Activity/ViewModel teardown.
+private object PositionWrites {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lock = Mutex()
+    suspend fun awaitPending() { lock.withLock { } }
+
+    fun enqueue(repo: ShelfRepository, id: Long, locator: Locator, chapters: Int) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            lock.withLock {
+                try { repo.savePosition(id, locator, chapters) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { Log.w("ReaderProgress", "Unable to save reading position", e) }
             }
         }
     }

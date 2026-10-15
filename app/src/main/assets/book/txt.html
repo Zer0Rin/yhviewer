@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh" data-theme="__THEME__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chapter</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
+  <style>
+    body {
+      margin: 0 auto; max-width: 720px; padding: 20px 20px 64px;
+      color: var(--fg); background: var(--bg);
+      font: 18px/1.9 var(--font-body); -webkit-text-size-adjust: 100%;
+      word-wrap: break-word; text-align: justify;
+    }
+    h1 { font-size: 1.25em; line-height: 1.4; color: var(--heading); margin: .4em 0 1.4em; text-align: left; }
+    p { margin: 0 0 .9em; text-indent: 2em; }
+    .end { margin-top: 3em; text-align: center; color: var(--muted); font-size: .8em; text-indent: 0; }
+    [data-theme="terminal"] body { font-size: 15px; line-height: 1.75; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1 id="title"></h1>
+  <main id="content"></main>
+
+  <!-- Kotlin 替换成 JSON：{"title": "...", "text": "...", "position": "3 / 120"} -->
+  <script type="application/json" id="payload">/*PAYLOAD*/</script>
+  <script>
+    window.setTheme = function (t) {
+      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) document.documentElement.setAttribute('data-theme', t);
+    };
+    (function () {
+      var p = JSON.parse(document.getElementById('payload').textContent);
+      document.getElementById('title').textContent = p.title;
+      document.title = p.title;
+      var out = document.getElementById('content');
+      var frag = document.createDocumentFragment();
+      p.text.split(/\r?\n/).forEach(function (line) {
+        var s = line.replace(/^[\s　]+|[\s　]+$/g, '');   // 去掉全角空格缩进，统一用 text-indent
+        if (!s) return;
+        var el = document.createElement('p');
+        el.textContent = s;                                      // textContent：原文里的 <script> 只是文字
+        frag.appendChild(el);
+      });
+      out.appendChild(frag);
+      var end = document.createElement('p');
+      end.className = 'end';
+      end.textContent = p.position;
+      out.appendChild(end);
+    })();
+  </script>
+</body>
+</html>

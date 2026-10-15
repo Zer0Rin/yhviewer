@@ -129,8 +129,9 @@ class ReaderIntegrationTest {
     }
 
     @Test fun loaderRejectsFilesOverTwentyMiB() {
-        val uri = document("oversize.md", "text/plain", ByteArray(20 * 1024 * 1024 + 1) { 65 })
+        val uri = document("oversize.md", "text/markdown", ByteArray(20 * 1024 * 1024 + 1) { 65 })
         try {
+            assertEquals(DocType.MARKDOWN, runBlocking { DocumentLoader.probe(context, uri).type })
             val failure = runCatching { runBlocking { DocumentLoader.load(context, uri) } }.exceptionOrNull()
             assertEquals("文件超过 20MB", failure?.message)
         } finally { context.contentResolver.delete(uri, null, null) }

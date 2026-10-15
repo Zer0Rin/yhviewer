@@ -1,5 +1,7 @@
 # Markdown reader themes
 
+Historical pre-v2 record. V2 extends themes to code/TXT/EPUB and replaces pixel-offset restoration with chapter-relative ratios; see [v2 verification](V2_VERIFICATION.md).
+
 Date: 2026-10-15. Local device: Medium_Phone_API_37.0, 1080×2400, density 420. API 34 regression is also run by the repository CI workflow on push.
 
 ## Implementation

@@ -45,7 +45,7 @@ class SandboxIntegrationTest {
 
     private fun load(html: String) {
         val id = ++generation
-        compose.runOnUiThread { compose.activity.setContent { key(id) { YHViewerTheme { HtmlView(html, Modifier.fillMaxSize()) } } } }
+        compose.runOnUiThread { compose.activity.setContent { key(id) { YHViewerTheme { HtmlView(PageSource.Html(html), Modifier.fillMaxSize()) } } } }
         compose.waitUntil(20_000) { js("document.readyState") == "\"complete\"" && js("location.href") == "\"${Sandbox.DOC_URL}\"" }
     }
 
@@ -103,6 +103,7 @@ class SandboxIntegrationTest {
 
         for (url in listOf("https://example.com/probe", "file:///sdcard/Download/hello.html",
             "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fhello.html",
+            "http://${Sandbox.HOST}/doc/index.html", "https://${Sandbox.HOST}:8443/doc/index.html",
             "https://${Sandbox.HOST}/doc/missing.png", "https://${Sandbox.HOST}.example.com/probe")) {
             var code = 0
             instrumentation.runOnMainSync {

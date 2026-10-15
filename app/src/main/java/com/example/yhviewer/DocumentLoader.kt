@@ -6,83 +6,104 @@ import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 
-enum class DocType { HTML, MARKDOWN, UNKNOWN }
+enum class DocType { HTML, MARKDOWN, CODE, TXT, EPUB, UNKNOWN }
 
 data class LoadedDoc(val name: String, val type: DocType, val text: String)
 
-/**
- * 把别的 App 传来的 content:// Uri 读成文本。
- * 注意：安卓上拿到的通常不是文件路径，只能通过 ContentResolver 读流。
- */
-object DocumentLoader {
-    private const val MAX_BYTES = 20L * 1024 * 1024 // 20MB 上限，防止误开巨型文件卡死
-
-    suspend fun load(context: Context, uri: Uri): LoadedDoc = withContext(Dispatchers.IO) {
-        val resolver = context.contentResolver
-        val name = queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "untitled"
-        val type = detectType(name, resolver.getType(uri))
-
-        val text = resolver.openInputStream(uri)?.use { input ->
-            val out = ByteArrayOutputStream()
-            val buf = ByteArray(8192)
-            var total = 0L
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                total += n
-                if (total > MAX_BYTES) throw IOException("文件超过 20MB")
-                out.write(buf, 0, n)
-            }
-            String(out.toByteArray(), Charsets.UTF_8) // 先假设 UTF-8，AI 生成的文件基本都是
-        } ?: throw IOException("无法打开文件")
-
-        LoadedDoc(name, type, text)
-    }
-
-    /** content:// 的真实文件名要查 OpenableColumns，uri 本身往往是一串 id */
-    private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching {
-        context.contentResolver
-            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-    }.getOrNull()
-
-    /** 后缀优先，MIME 兜底（很多文件管理器把 .md 报成 text/plain 或 octet-stream） */
-    private fun detectType(name: String, mime: String?): DocType {
+/** 文件名 / MIME → 类型。纯 Kotlin，可单元测试 */
+object DocTypes {
+    fun detect(name: String, mime: String?): DocType {
         val ext = name.substringAfterLast('.', "").lowercase()
         return when {
             ext in setOf("html", "htm", "xhtml") -> DocType.HTML
             ext in setOf("md", "markdown", "mdown") -> DocType.MARKDOWN
+            ext == "epub" -> DocType.EPUB
+            CodeLanguages.forFileName(name) != null -> DocType.CODE   // 要在 txt 之前：CMakeLists.txt 是代码
+            ext == "txt" -> DocType.TXT
             mime == "text/html" -> DocType.HTML
             mime == "text/markdown" || mime == "text/x-markdown" -> DocType.MARKDOWN
-            else -> DocType.UNKNOWN
+            mime == "application/epub+zip" -> DocType.EPUB
+            else -> DocType.UNKNOWN                                    // 无扩展名的文本：按纯文本代码视图显示
         }
     }
 }
 
 /**
- * 转成 WebView 能显示的 HTML。
- * HTML 原样显示；Markdown 使用本地渲染模板；未知类型仍以转义后的纯文本显示。
+ * 读取别的 App 传来的 content:// Uri。
+ * 三个入口：probe 只看文件名和类型；readText 读文本（自动识别编码）；copyTo 原样复制二进制（EPUB）。
+ * 都带大小上限，边读边数字节，不信任对方声明的大小。
  */
-fun LoadedDoc.toDisplayHtml(context: Context, theme: ReaderTheme = ReaderTheme.AUTO): String = when (type) {
-    DocType.HTML -> text
-    DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
-    DocType.UNKNOWN -> """
-        <!doctype html>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          :root { color-scheme: light dark; }
-          body { margin: 0; padding: 16px; font: 14px/1.6 monospace; }
-          pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-        </style>
-        <pre>${escapeHtml(text)}</pre>
-    """.trimIndent()
+object DocumentLoader {
+    const val MAX_TEXT_BYTES = 20L * 1024 * 1024      // HTML / MD / 代码
+    const val MAX_TXT_BYTES = 32L * 1024 * 1024       // 小说 TXT 普遍更大
+    const val MAX_EPUB_BYTES = 100L * 1024 * 1024
+
+    data class Source(val name: String, val type: DocType)
+
+    suspend fun probe(context: Context, uri: Uri): Source = withContext(Dispatchers.IO) {
+        val name = queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "untitled"
+        Source(name, DocTypes.detect(name, context.contentResolver.getType(uri)))
+    }
+
+    suspend fun readText(context: Context, uri: Uri, maxBytes: Long): String = withContext(Dispatchers.IO) {
+        val bytes = ByteArrayOutputStream()
+        open(context, uri).use { copyLimited(it, bytes, maxBytes) }
+        CharsetDetector.decode(bytes.toByteArray()).text
+    }
+
+    suspend fun copyTo(context: Context, uri: Uri, dest: File, maxBytes: Long): Long = withContext(Dispatchers.IO) {
+        dest.parentFile?.mkdirs()
+        open(context, uri).use { input -> dest.outputStream().use { copyLimited(input, it, maxBytes) } }
+    }
+
+    /** 兼容旧调用：读成单个文本文档 */
+    suspend fun load(context: Context, uri: Uri): LoadedDoc {
+        val source = probe(context, uri)
+        val max = if (source.type == DocType.TXT) MAX_TXT_BYTES else MAX_TEXT_BYTES
+        return LoadedDoc(source.name, source.type, readText(context, uri, max))
+    }
+
+    private fun open(context: Context, uri: Uri): InputStream =
+        context.contentResolver.openInputStream(uri) ?: throw IOException("无法打开文件")
+
+    private fun copyLimited(input: InputStream, out: OutputStream, maxBytes: Long): Long {
+        val buf = ByteArray(16 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) throw IOException("文件超过 ${maxBytes / 1024 / 1024}MB")
+            out.write(buf, 0, n)
+        }
+        return total
+    }
+
+    private fun queryDisplayName(context: Context, uri: Uri): String? = runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }.getOrNull()
 }
 
-private fun escapeHtml(s: String): String = s
-    .replace("&", "&amp;")
-    .replace("<", "&lt;")
-    .replace(">", "&gt;")
-    .replace("\"", "&quot;")
+/** 单页文档 → 可显示的 HTML。TXT / EPUB 是分章节的，不走这里 */
+fun LoadedDoc.toDisplayHtml(
+    context: Context,
+    theme: ReaderTheme = ReaderTheme.AUTO,
+    wrap: Boolean = false,
+): String = when (type) {
+    DocType.HTML -> text
+    DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
+    DocType.CODE, DocType.UNKNOWN, DocType.TXT, DocType.EPUB -> CodeRenderer.render(
+        text = text,
+        lang = CodeLanguages.forFileName(name) ?: "plaintext",
+        wrap = wrap,
+        template = Templates.get(context, Templates.CODE),
+        theme = theme,
+    )
+}

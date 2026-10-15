@@ -1,6 +1,7 @@
 package com.example.yhviewer
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -11,29 +12,37 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 书架里的一条记录。文件内容不进数据库，存成 filesDir/shelf/<localFile> 的副本；
- * 数据库只存元数据（和后端"大字段放对象存储，表里只放 key"一个思路）。
+ * 书架记录。文件内容不进数据库：文本类存成 filesDir/shelf/<localFile>（统一 UTF-8），
+ * EPUB 解压成 filesDir/shelf/<localFile>/ 目录。
+ *
+ * v2 新增：locator（阅读位置，见 Locator）、progress（全书进度 0..1，书架显示用）。
+ * 新增枚举值 CODE / TXT / EPUB 不需要迁移：type 按名字存成 TEXT。
  */
 @Entity(
     tableName = "books",
     indices = [
-        Index(value = ["sourceUri"], unique = true), // 同一个来源只保留一条
-        Index(value = ["lastOpenedAt"]),             // 书架按最近打开排序
+        Index(value = ["sourceUri"], unique = true),
+        Index(value = ["lastOpenedAt"]),
     ],
 )
 data class Book(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sourceUri: String,
     val name: String,
-    val type: DocType,        // Room 内置枚举支持，按名字存成 TEXT
+    val type: DocType,
     val localFile: String,
     val sizeBytes: Long,
     val addedAt: Long,
     val lastOpenedAt: Long,
     val favorite: Boolean = false,
+    val locator: String? = null,
+    // defaultValue 必须和迁移里的 DEFAULT 0 一致，否则 Room 校验表结构时会报"迁移不正确"
+    @ColumnInfo(defaultValue = "0") val progress: Float = 0f,
 )
 
 @Dao
@@ -48,13 +57,16 @@ interface BookDao {
         ORDER BY lastOpenedAt DESC
         """
     )
-    fun observe(pattern: String, favoritesOnly: Boolean): Flow<List<Book>> // 返回 Flow：表一变，列表自动刷新
+    fun observe(pattern: String, favoritesOnly: Boolean): Flow<List<Book>>
 
     @Query("SELECT * FROM books WHERE id = :id")
     suspend fun get(id: Long): Book?
 
     @Query("SELECT * FROM books WHERE sourceUri = :uri")
     suspend fun findBySource(uri: String): Book?
+
+    @Query("SELECT localFile FROM books")
+    suspend fun allLocalFiles(): List<String>
 
     @Insert
     suspend fun insert(book: Book): Long
@@ -68,11 +80,22 @@ interface BookDao {
     @Query("UPDATE books SET lastOpenedAt = :time WHERE id = :id")
     suspend fun touch(id: Long, time: Long)
 
+    @Query("UPDATE books SET locator = :locator, progress = :progress WHERE id = :id")
+    suspend fun updatePosition(id: Long, locator: String, progress: Float)
+
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: Long)
 }
 
-@Database(entities = [Book::class], version = 1, exportSchema = true)
+/** v1 → v2：加两列。老数据保留，locator 为空（从头读），progress 为 0 */
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE books ADD COLUMN locator TEXT")
+        db.execSQL("ALTER TABLE books ADD COLUMN progress REAL NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Book::class], version = 2, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
 
@@ -80,12 +103,12 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var instance: AppDatabase? = null
 
-        // 双重检查锁单例：整个 App 只开一个数据库连接池
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
-                instance ?: Room.databaseBuilder(
-                    context.applicationContext, AppDatabase::class.java, "shelf.db"
-                ).build().also { instance = it }
+                instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "shelf.db")
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instance = it }
             }
     }
 }

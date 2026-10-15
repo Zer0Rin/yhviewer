@@ -94,6 +94,19 @@ class ReaderThemeIntegrationTest {
         compose.waitUntil(25_000) { js(scenario, expression) == expected }
     private fun ready(scenario: ActivityScenario<MainActivity>) = waitJs(scenario,
         "document.readyState==='complete' && !!document.querySelector('#content h1')")
+    private fun changeNight(scenario: ActivityScenario<MainActivity>, mode: String) {
+        var previous: MainActivity? = null
+        scenario.onActivity { previous = it }
+        shell("cmd uimode night $mode")
+        // The configuration command returns before Activity recreation. Do not inspect the old
+        // DOM and then accidentally assert against a new, still blank WebView.
+        compose.waitUntil(25_000) {
+            var changed = false
+            scenario.onActivity { changed = it !== previous }
+            changed
+        }
+        ready(scenario)
+    }
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
         compose.onNode(hasText(label, substring = true)).performClick()
@@ -113,10 +126,11 @@ class ReaderThemeIntegrationTest {
             for ((id, label) in listOf("paper" to "纸张（浅）", "ink" to "墨色（深）", "terminal" to "终端", "auto" to "跟随系统")) {
                 js(scenario, "scrollTo(0,600)")
                 waitJs(scenario, "Math.abs(scrollY-600)<2")
+                js(scenario, "window.__beforeRatio=scrollY/(document.documentElement.scrollHeight-innerHeight)")
                 select(label)
                 theme(scenario, id)
-                // Flush CSS/layout, then verify pixel position and same document/WebView.
-                waitJs(scenario, "document.body.offsetHeight>0 && Math.abs(scrollY-600)<2")
+                // Themes reflow text; v2 preserves a relative position, while keeping the same DOM.
+                waitJs(scenario, "document.body.offsetHeight>0 && Math.abs(scrollY/(document.documentElement.scrollHeight-innerHeight)-window.__beforeRatio)<.02")
                 assertEquals("\"same-document\"", js(scenario, "window.__themeSentinel"))
                 scenario.onActivity { assertSame(initialWeb, web(it.window.decorView)) }
                 assertEquals("true", js(scenario, "document.documentElement.scrollWidth<=innerWidth && document.body.scrollWidth<=innerWidth"))
@@ -156,16 +170,14 @@ class ReaderThemeIntegrationTest {
             select("跟随系统")
             theme(scenario, "auto")
             assertEquals("\"rgb(250, 249, 245)\"", js(scenario, "getComputedStyle(document.documentElement).backgroundColor"))
-            shell("cmd uimode night yes")
-            ready(scenario)
+            changeNight(scenario, "yes")
             waitJs(scenario, "matchMedia('(prefers-color-scheme: dark)').matches")
             assertEquals("\"rgb(38, 38, 36)\"", js(scenario, "getComputedStyle(document.documentElement).backgroundColor"))
             select("纸张（浅）")
             theme(scenario, "paper")
             assertEquals("\"rgb(250, 249, 245)\"", js(scenario, "getComputedStyle(document.documentElement).backgroundColor"))
             select("跟随系统")
-            shell("cmd uimode night no")
-            ready(scenario)
+            changeNight(scenario, "no")
             waitJs(scenario, "!matchMedia('(prefers-color-scheme: dark)').matches")
             assertEquals("\"rgb(250, 249, 245)\"", js(scenario, "getComputedStyle(document.documentElement).backgroundColor"))
         }
@@ -199,16 +211,16 @@ class ReaderThemeIntegrationTest {
     }
     @Test fun initialThemeWaitsForPageAndInvalidNativeValuesAreRejected() {
         ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use { scenario ->
-            val selected = mutableStateOf("ink")
+            val selected = mutableStateOf(ReaderTheme.INK)
             val html = MarkdownRenderer.render(source, MarkdownRenderer.template(context))
             scenario.onActivity { activity ->
-                activity.setContent { YHViewerTheme { HtmlView(html, Modifier.fillMaxSize(), selected.value) } }
+                activity.setContent { YHViewerTheme { HtmlView(PageSource.Html(html), Modifier.fillMaxSize(), selected.value) } }
             }
             ready(scenario)
             theme(scenario, "ink")
-            compose.runOnUiThread { selected.value = "ink');window.__themeInjected=1;//" }
+            compose.runOnUiThread { selected.value = ReaderTheme.fromId("ink');window.__themeInjected=1;//") }
             compose.waitForIdle()
-            theme(scenario, "ink")
+            theme(scenario, "auto")
             assertEquals("\"undefined\"", js(scenario, "typeof window.__themeInjected"))
         }
     }

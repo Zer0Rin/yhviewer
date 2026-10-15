@@ -24,24 +24,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- 文件管理器"打开方式" -->
+            <!-- Open content:// documents from file managers. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
-                <data android:mimeType="text/html" />
-                <data android:mimeType="text/markdown" />
-                <data android:mimeType="text/x-markdown" />
-                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/javascript" />
+                <data android:mimeType="application/x-yaml" />
+                <data android:mimeType="application/x-sh" />
+                <data android:mimeType="application/epub+zip" />
             </intent-filter>
-
-            <!-- 别的 App"分享"文件。故意不收 text/plain，否则所有分享文字的地方都会出现你的 App -->
+            <!-- Receive document streams, without advertising generic text sharing. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/html" />
                 <data android:mimeType="text/markdown" />
                 <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/epub+zip" />
             </intent-filter>
         </activity>
     </application>

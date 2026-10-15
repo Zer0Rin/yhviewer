@@ -16,37 +16,35 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
+import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
+import java.io.File
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * 沙箱的四道门（纵深防御，任何一道失效，其他几道仍然挡得住）：
- *
- *  1. 系统权限：Manifest 不声明 INTERNET → 整个 App 没有网络
- *  2. WebView 设置：禁止访问 file:// 和 content://，不开 JS 桥、不允许自动弹窗
- *  3. 请求拦截：shouldInterceptRequest 只放行"我们自己的虚拟域名"，其余一律 403
- *  4. CSP 响应头：浏览器内核层面禁止联网（connect-src 'none'）、禁止外部脚本/图片/iframe
- *
- * 另外：外部链接只有"用户亲手点击"才交给系统浏览器，脚本自动跳转一律拦截。
+ *  1. 系统权限：Manifest 不声明 INTERNET
+ *  2. WebView 设置：禁止 file:// 和 content://，不开 JS 桥，不允许自动弹窗；EPUB 章节直接关闭 JS
+ *  3. 请求拦截：shouldInterceptRequest 只放行虚拟域名，其余一律 403
+ *  4. CSP 响应头：我们自己的模板允许内联脚本；EPUB 章节 script-src 'none'
  */
 object Sandbox {
     const val TAG = "Sandbox"
-
-    // androidx.webkit 预留的虚拟域名，永远不会解析到真实服务器
     const val HOST = "appassets.androidplatform.net"
     const val DOC_URL = "https://$HOST/doc/index.html"
 
-    // 'self' = 上面的虚拟域名。inline 脚本和样式要放行，否则 AI 生成的单文件 HTML 基本跑不起来
-    val CSP = listOf(
+    private val COMMON = listOf(
         "default-src 'none'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:",
         "style-src 'self' 'unsafe-inline' data:",
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
@@ -55,21 +53,64 @@ object Sandbox {
         "frame-src 'none'",
         "form-action 'none'",
         "base-uri 'none'",
-    ).joinToString("; ")
+    )
+
+    /** 单页文档（HTML/MD/代码/TXT 模板）：AI 生成的 HTML 依赖内联脚本 */
+    val CSP = (COMMON + "script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:").joinToString("; ")
+
+    /** EPUB 章节：电子书不需要脚本，一律禁止 */
+    val BOOK_CSP = (COMMON + "script-src 'none'").joinToString("; ")
+
+    fun isLocal(url: Uri): Boolean = url.scheme == "https" && url.host == HOST && url.port in setOf(-1, 443)
+
+    /** 章节路径逐段编码（文件名里可能有空格、中文） */
+    fun bookUrl(path: String): String =
+        "https://$HOST/book/" + path.split('/').joinToString("/") { Uri.encode(it) }
 }
 
-/** 把读出来的文档当作虚拟域名下的 /doc/index.html 提供，并附带 CSP 响应头 */
+/** WebView 要显示的内容 */
+sealed interface PageSource {
+    /** 我们生成的整页 HTML，挂在 /doc/index.html */
+    data class Html(val html: String) : PageSource
+
+    /** EPUB 解压目录里的一个章节文件，挂在 /book/<path> */
+    data class BookFile(val rootDir: File, val path: String, val fragment: String? = null) : PageSource
+}
+
+private fun noStoreResponse(mime: String?, encoding: String?, csp: String, body: java.io.InputStream?) =
+    WebResourceResponse(
+        mime, encoding, 200, "OK",
+        mapOf("Content-Security-Policy" to csp, "Cache-Control" to "no-store"),
+        body,
+    )
+
 private class DocumentPathHandler(private val html: String) : WebViewAssetLoader.PathHandler {
     override fun handle(path: String): WebResourceResponse? {
-        if (path != "index.html") return null // 相对路径资源暂不支持（见回复说明）
-        return WebResourceResponse(
-            "text/html", "utf-8", 200, "OK",
-            mapOf(
-                "Content-Security-Policy" to Sandbox.CSP,
-                "Cache-Control" to "no-store",
-            ),
-            ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
-        )
+        if (path != "index.html") return null
+        return noStoreResponse("text/html", "utf-8", Sandbox.CSP, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
+    }
+}
+
+/**
+ * 从 EPUB 解压目录提供文件。
+ * 路径穿越防护交给 androidx 的 InternalStoragePathHandler；我们只做两件事：
+ * 给所有响应加上禁止脚本的 CSP，并在章节 XHTML 里注入主题样式。
+ */
+private class EpubPathHandler(
+    context: Context,
+    rootDir: File,
+    private val theme: () -> ReaderTheme,
+) : WebViewAssetLoader.PathHandler {
+    private val files = WebViewAssetLoader.InternalStoragePathHandler(context, rootDir)
+
+    override fun handle(path: String): WebResourceResponse? {
+        val res = files.handle(path)?.takeIf { it.data != null } ?: return null
+        val lower = path.lowercase()
+        val isChapter = lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")
+        if (!isChapter) return noStoreResponse(res.mimeType, res.encoding, Sandbox.BOOK_CSP, res.data)
+        val text = res.data?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return res
+        val injected = EpubInjector.inject(text, theme()).toByteArray(Charsets.UTF_8)
+        return noStoreResponse(res.mimeType, "utf-8", Sandbox.BOOK_CSP, ByteArrayInputStream(injected))
     }
 }
 
@@ -77,27 +118,23 @@ private class SandboxClient(
     private val loader: WebViewAssetLoader,
     private val onHistoryChanged: (Boolean) -> Unit,
     private val onExternalLink: (Uri) -> Unit,
-    private val onPageReady: (WebView) -> Unit,
+    private val onPageLoaded: (WebView) -> Unit,
+    private val onInternalLink: (Uri) -> Boolean,
 ) : WebViewClient() {
 
-    // 注意：这个方法跑在后台线程，不能直接改 Compose 状态
+    // 跑在后台线程，不能直接改 Compose 状态
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val url = request.url
-        if (url.host == Sandbox.HOST) {
+        if (Sandbox.isLocal(url)) {
             loader.shouldInterceptRequest(url)?.let { return it }
         }
         Log.w(Sandbox.TAG, "blocked request: ${request.method} $url")
-        return WebResourceResponse(
-            "text/plain", "utf-8", 403, "Blocked by sandbox",
-            emptyMap(), ByteArrayInputStream(ByteArray(0)),
-        )
+        return WebResourceResponse("text/plain", "utf-8", 403, "Blocked by sandbox", emptyMap(), ByteArrayInputStream(ByteArray(0)))
     }
 
-    // 页面导航（点链接、location = ...）都会先经过这里；返回 true = 我们接管，WebView 不加载
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
-        if (url.host == Sandbox.HOST) return false
-
+        if (Sandbox.isLocal(url)) return onInternalLink(url) // true = 我们接管（如切换 EPUB 章节）
         val userClicked = request.isForMainFrame && request.hasGesture()
         if (userClicked && url.scheme in setOf("http", "https", "mailto")) {
             onExternalLink(url)
@@ -109,7 +146,7 @@ private class SandboxClient(
 
     override fun onPageFinished(view: WebView, url: String?) {
         super.onPageFinished(view, url)
-        if (url == Sandbox.DOC_URL) onPageReady(view)
+        onPageLoaded(view)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
@@ -118,14 +155,13 @@ private class SandboxClient(
     }
 }
 
-// 这里有意开启 JS：AI 生成的页面依赖它；风险由上面的拦截和 CSP 兜住
-@SuppressLint("SetJavaScriptEnabled")
-private fun WebView.applySandboxSettings() {
+@SuppressLint("SetJavaScriptEnabled") // 我们的模板需要 JS；风险由拦截和 CSP 兜住。EPUB 章节关闭
+private fun WebView.applySandboxSettings(allowJs: Boolean) {
     settings.apply {
-        javaScriptEnabled = true
-        allowFileAccess = false          // 禁止 file://
-        allowContentAccess = false       // 禁止 content://
-        domStorageEnabled = true         // 很多页面用 localStorage，关掉会直接报错；靠每次清空做隔离
+        javaScriptEnabled = allowJs
+        allowFileAccess = false
+        allowContentAccess = false
+        domStorageEnabled = allowJs
         javaScriptCanOpenWindowsAutomatically = false
         setSupportMultipleWindows(false)
         setGeolocationEnabled(false)
@@ -133,7 +169,6 @@ private fun WebView.applySandboxSettings() {
         cacheMode = WebSettings.LOAD_NO_CACHE
     }
     CookieManager.getInstance().setAcceptCookie(false)
-    // 不调用 addJavascriptInterface：页面拿不到任何 Kotlin 对象
 }
 
 private fun openExternal(context: Context, uri: Uri) {
@@ -144,50 +179,120 @@ private fun openExternal(context: Context, uri: Uri) {
     }
 }
 
-private fun WebView.applyReaderTheme(theme: String?) {
-    // Validate at the native boundary too; never interpolate arbitrary JS input.
-    val id = ReaderTheme.entries.firstOrNull { it.id == theme }?.id ?: return
-    evaluateJavascript("window.setTheme && window.setTheme(${MarkdownRenderer.toJsonString(id)})", null)
+// ---------------- Reading position ----------------
+
+@Suppress("DEPRECATION") // contentHeight is in CSS pixels; use the actual WebView scale, including zoom.
+private fun WebView.maxScrollPx(): Int = max(0, (contentHeight * scale).roundToInt() - height)
+
+fun WebView.scrollRatio(): Float {
+    val range = maxScrollPx()
+    return if (range == 0) 0f else (scrollY.toFloat() / range).coerceIn(0f, 1f)
 }
 
-/** A document keeps its WebView while its Markdown theme changes. */
+private suspend fun WebView.restoreRatio(ratio: Float) {
+    var last = -1
+    var stable = 0
+    repeat(30) {
+        val h = contentHeight
+        if (h > 0 && h == last) {
+            if (++stable >= 3) {
+                scrollTo(0, (ratio * maxScrollPx()).roundToInt())
+                return
+            }
+        } else { stable = 0; last = h }
+        delay(100)
+    }
+    scrollTo(0, (ratio * maxScrollPx()).roundToInt())
+}
+
+private class ScrollPosition(var ratio: Float, var reporting: Boolean = false)
+
+/** HTML templates update live; EPUB keeps scripts disabled and reloads with injected CSS. */
 @Composable
-fun HtmlView(html: String, modifier: Modifier = Modifier, theme: String? = null) {
-    val currentTheme by rememberUpdatedState(theme)
+fun HtmlView(
+    source: PageSource,
+    modifier: Modifier = Modifier,
+    theme: ReaderTheme? = null,
+    wrap: Boolean? = null,
+    initialRatio: Float = 0f,
+    onRatioChanged: (Float) -> Unit = {},
+    onInternalLink: (String, String?) -> Boolean = { _, _ -> false },
+    bookTheme: () -> ReaderTheme = { ReaderTheme.AUTO },
+) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
-
-    LaunchedEffect(theme, webView) {
-        webView?.applyReaderTheme(theme)
-    }
+    var pageLoads by remember { mutableIntStateOf(0) }
+    val position = remember { ScrollPosition(initialRatio.coerceIn(0f, 1f)) }
+    val latestOnRatio by rememberUpdatedState(onRatioChanged)
+    val latestOnLink by rememberUpdatedState(onInternalLink)
+    val latestBookTheme by rememberUpdatedState(bookTheme)
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
+
+    // One effect handles initial readiness and subsequent changes. In particular, a selection
+    // made before page scripts exist is applied once onPageFinished increments pageLoads.
+    LaunchedEffect(theme, wrap, webView, pageLoads) {
+        val view = webView ?: return@LaunchedEffect
+        if (pageLoads == 0) return@LaunchedEffect
+        position.reporting = false
+        if (source is PageSource.Html) {
+            val updates = buildList {
+                theme?.let { add("window.setTheme && window.setTheme(${MarkdownRenderer.toJsonString(it.id)})") }
+                wrap?.let { add("window.setWrap && window.setWrap($it)") }
+            }
+            if (updates.isNotEmpty()) view.evaluateJavascript(updates.joinToString(";"), null)
+        }
+        if (position.ratio > 0f) view.restoreRatio(position.ratio)
+        position.ratio = view.scrollRatio()
+        position.reporting = true
+        latestOnRatio(position.ratio)
+    }
 
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            // 所有文档共用一个虚拟域名 = 同一个 origin，所以每次打开前清空存储，
-            // 防止 A 文档读到 B 文档写进 localStorage 的数据
             WebStorage.getInstance().deleteAllData()
-
-            val loader = WebViewAssetLoader.Builder()
+            val builder = WebViewAssetLoader.Builder()
                 .setDomain(Sandbox.HOST)
-                .addPathHandler("/doc/", DocumentPathHandler(html))
                 .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                .build()
-
+            val startUrl = when (source) {
+                is PageSource.Html -> {
+                    builder.addPathHandler("/doc/", DocumentPathHandler(source.html))
+                    Sandbox.DOC_URL
+                }
+                is PageSource.BookFile -> {
+                    builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir) { latestBookTheme() })
+                    Sandbox.bookUrl(source.path) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
+                }
+            }
+            val loader = builder.build()
             WebView(context).apply {
-                applySandboxSettings()
+                applySandboxSettings(allowJs = source is PageSource.Html)
                 webViewClient = SandboxClient(
                     loader = loader,
                     onHistoryChanged = { canGoBack = it },
                     onExternalLink = { uri -> openExternal(context, uri) },
-                    onPageReady = { view -> view.applyReaderTheme(currentTheme) },
+                    onPageLoaded = { pageLoads++ },
+                    onInternalLink = { uri ->
+                        val path = uri.path.orEmpty()
+                        if (path.startsWith("/book/")) latestOnLink(path.removePrefix("/book/"), uri.fragment) else false
+                    },
                 )
-                loadUrl(Sandbox.DOC_URL)
+                setOnScrollChangeListener { _, _, _, _, _ ->
+                    if (position.reporting) {
+                        position.ratio = scrollRatio()
+                        latestOnRatio(position.ratio)
+                    }
+                }
+                loadUrl(startUrl)
                 webView = this
             }
         },
-        onRelease = { webView = null; it.destroy() },
+        onRelease = {
+            position.reporting = false
+            it.setOnScrollChangeListener(null)
+            webView = null
+            it.destroy()
+        },
     )
 }

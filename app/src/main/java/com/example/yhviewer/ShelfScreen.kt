@@ -2,6 +2,7 @@ package com.example.yhviewer
 
 import android.text.format.DateUtils
 import android.text.format.Formatter
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -77,7 +78,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
             when {
                 list == null -> Unit // 第一次查询还没回来，什么都不画，避免空状态闪烁
                 list.isEmpty() && !filtering -> CenterText(
-                    "书架还是空的。\n在文件管理器里用本应用打开 HTML / Markdown，\n或点右上角「打开」。",
+                    "书架还是空的。\n在文件管理器里用本应用打开 HTML、Markdown、代码、TXT 或 EPUB，\n或点右上角「打开」。",
                     Modifier.fillMaxSize(),
                 )
                 list.isEmpty() -> CenterText("没有匹配的文档", Modifier.fillMaxSize())
@@ -126,7 +127,7 @@ private fun BookRow(
             .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TypeBadge(book.type)
+        TypeBadge(book)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -137,7 +138,8 @@ private fun BookRow(
             )
             Text(
                 "${DateUtils.getRelativeTimeSpanString(book.lastOpenedAt)} · " +
-                    Formatter.formatShortFileSize(context, book.sizeBytes),
+                    Formatter.formatShortFileSize(context, book.sizeBytes) +
+                    (if (book.progress >= 0.01f) " · 读到 ${(book.progress * 100).roundToInt()}%" else ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -155,11 +157,14 @@ private fun BookRow(
 }
 
 @Composable
-private fun TypeBadge(type: DocType) {
-    val label = when (type) {
+private fun TypeBadge(book: Book) {
+    val label = when (book.type) {
         DocType.HTML -> "HTML"
         DocType.MARKDOWN -> "MD"
-        DocType.UNKNOWN -> "TXT"
+        DocType.CODE -> CodeLanguages.badge(book.name)
+        DocType.TXT -> "TXT"
+        DocType.EPUB -> "EPUB"
+        DocType.UNKNOWN -> "TEXT"
     }
     Box(
         modifier = Modifier

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh" data-theme="__THEME__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
+  <style>
+    body { margin: 0; background: var(--bg); color: var(--code-fg); -webkit-text-size-adjust: 100%; }
+
+    /* 顶部信息条：语言 · 行数 · 提示 */
+    .meta {
+      position: sticky; top: 0; z-index: 2;
+      display: flex; flex-wrap: wrap; gap: 4px 10px;
+      padding: 8px 14px; background: var(--bg); border-bottom: 1px solid var(--border);
+      font: 12px/1.4 var(--font-sans); color: var(--muted);
+    }
+    .meta .lang { color: var(--accent); font-weight: 600; }
+
+    /* 代码区：不换行时整体横向滚动，行号用 sticky 固定在左侧 */
+    .code { font: 13px/1.6 var(--font-mono); padding: 6px 0 48px; overflow-x: auto; }
+    .chunk { content-visibility: auto; width: max-content; min-width: 100%; }           /* 屏幕外的块跳过布局和绘制：大文件的"轻量虚拟列表" */
+    .l { display: flex; width: max-content; min-width: 100%; }
+    .n {
+      position: sticky; left: 0; flex: none; width: var(--gutter, 3ch);
+      padding: 0 12px 0 10px; text-align: right; background: var(--bg);
+      color: var(--muted); opacity: .55;
+      user-select: none; -webkit-user-select: none;  /* 复制代码时不带行号 */
+    }
+    .n::before { content: attr(data-n); }          /* 行号用伪元素：不是真实文本，选不中也复制不到 */
+    .t { white-space: pre; padding-right: 16px; tab-size: 4; }
+
+    /* 自动换行模式 */
+    .code.wrap .chunk { width: auto; }
+    .code.wrap .l { width: auto; }
+    .code.wrap .t { white-space: pre-wrap; word-break: break-word; min-width: 0; flex: 1; }
+
+    .l:active .n { opacity: 1; color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="meta" id="meta"></div>
+  <div class="code" id="code"></div>
+
+  <!-- Kotlin 替换成 JSON：{"text": "...", "lang": "kotlin", "wrap": false}（"<" 均已编码为 \u003c） -->
+  <script type="application/json" id="payload">/*PAYLOAD*/</script>
+
+  <script src="/assets/md/highlight.min.js"></script>
+  <script>
+    var THEMES = ['auto', 'paper', 'ink', 'terminal'];
+    window.setTheme = function (t) {
+      if (THEMES.indexOf(t) >= 0) document.documentElement.setAttribute('data-theme', t);
+    };
+    window.setWrap = function (on) {
+      document.getElementById('code').classList.toggle('wrap', !!on);
+    };
+
+    var MAX_HIGHLIGHT_CHARS = 500000;   // 超过就不高亮：hljs 处理几 MB 文本会卡住 WebView
+    var MAX_HIGHLIGHT_LINES = 20000;
+    var CHUNK = 200;                    // 每 200 行一个块，配合 content-visibility
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // 把 hljs 输出的整段 HTML 按行切开。
+    // 难点：多行 token（块注释、多行字符串）的 <span> 会跨行，
+    // 所以每行结尾要补齐闭合标签，下一行开头重新打开同样的标签。
+    function splitHighlighted(html) {
+      var lines = [], open = [], cur = '';
+      var re = /(<span[^>]*>)|(<\/span>)|(\n)|([^<\n]+)/g, m;
+      while ((m = re.exec(html)) !== null) {
+        if (m[1]) { open.push(m[1]); cur += m[1]; }
+        else if (m[2]) { open.pop(); cur += m[2]; }
+        else if (m[3]) { cur += repeat('</span>', open.length); lines.push(cur); cur = open.join(''); }
+        else { cur += m[4]; }
+      }
+      lines.push(cur + repeat('</span>', open.length));
+      return lines;
+    }
+    function repeat(s, n) { var r = ''; for (var i = 0; i < n; i++) r += s; return r; }
+
+    function langLabel(lang) {
+      var map = { kotlin: 'Kotlin', java: 'Java', python: 'Python', javascript: 'JavaScript', typescript: 'TypeScript',
+        go: 'Go', rust: 'Rust', c: 'C', cpp: 'C++', csharp: 'C#', swift: 'Swift', ruby: 'Ruby', php: 'PHP',
+        bash: 'Shell', sql: 'SQL', json: 'JSON', yaml: 'YAML', xml: 'XML', css: 'CSS', scss: 'SCSS', ini: 'INI',
+        diff: 'Diff', lua: 'Lua', r: 'R', makefile: 'Makefile', markdown: 'Markdown', plaintext: '纯文本' };
+      return map[lang] || lang;
+    }
+
+    (function () {
+      var p = JSON.parse(document.getElementById('payload').textContent);
+      var text = p.text.replace(/\r\n?/g, '\n');
+      var lang = p.lang || 'plaintext';
+      var notes = [];
+
+      // 单行 JSON（接口返回、压缩过的配置）自动格式化
+      if (lang === 'json' && text.length <= MAX_HIGHLIGHT_CHARS && text.split('\n').length <= 2) {
+        try { text = JSON.stringify(JSON.parse(text), null, 2); notes.push('已格式化单行 JSON'); } catch (e) { /* 不是合法 JSON 就原样显示 */ }
+      }
+      if (text.endsWith('\n')) text = text.slice(0, -1);   // 末尾换行不算一行
+
+      var lineCount = text.split('\n').length;
+      var canHighlight = window.hljs && lang !== 'plaintext' && hljs.getLanguage(lang) &&
+        text.length <= MAX_HIGHLIGHT_CHARS && lineCount <= MAX_HIGHLIGHT_LINES;
+      if (!canHighlight && (text.length > MAX_HIGHLIGHT_CHARS || lineCount > MAX_HIGHLIGHT_LINES)) {
+        notes.push('文件较大，已关闭高亮');
+      }
+
+      var lines;
+      if (canHighlight) {
+        try { lines = splitHighlighted(hljs.highlight(text, { language: lang, ignoreIllegals: true }).value); }
+        catch (e) { lines = escapeHtml(text).split('\n'); }
+      } else {
+        lines = escapeHtml(text).split('\n');
+      }
+
+      var digits = String(lines.length).length;
+      document.documentElement.style.setProperty('--gutter', Math.max(2, digits) + 'ch');
+
+      var html = [];
+      for (var i = 0; i < lines.length; i += CHUNK) {
+        var end = Math.min(i + CHUNK, lines.length);
+        // 估算块高度，让滚动条在块未渲染时也基本准确
+        html.push('<div class="chunk" style="contain-intrinsic-height:auto ' + ((end - i) * 21) + 'px">');
+        for (var j = i; j < end; j++) {
+          html.push('<div class="l"><span class="n" data-n="' + (j + 1) + '"></span><span class="t">' + lines[j] + '</span></div>');
+        }
+        html.push('</div>');
+      }
+      var codeEl = document.getElementById('code');
+      codeEl.innerHTML = html.join('');
+      // Flex rows with no text are omitted by WebView's default copied selection.
+      // Rebuild selected cells from a cloned range to retain blank lines and partial endpoints,
+      // while excluding gutter nodes. Other page selections keep normal browser behavior.
+      codeEl.addEventListener('copy', function (event) {
+        var selection = window.getSelection();
+        if (!event.clipboardData || !selection || !selection.rangeCount) return;
+        var range = selection.getRangeAt(0);
+        if (!codeEl.contains(range.startContainer) || !codeEl.contains(range.endContainer)) return;
+        var cells = range.cloneContents().querySelectorAll('.t');
+        var parts = [];
+        for (var c = 0; c < cells.length; c++) parts.push(cells[c].textContent);
+        event.clipboardData.setData('text/plain', cells.length ? parts.join('\n') : range.toString());
+        event.preventDefault();
+      });
+      window.setWrap(p.wrap);
+
+      var meta = '<span class="lang">' + escapeHtml(langLabel(lang)) + '</span><span>' + lines.length + ' 行</span>';
+      notes.forEach(function (n) { meta += '<span>' + escapeHtml(n) + '</span>'; });
+      document.getElementById('meta').innerHTML = meta;
+    })();
+  </script>
+</body>
+</html>

@@ -4,66 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Markdown</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
   <style>
-    /* ================================================================
-       主题系统：每个主题 = 一组 CSS 变量（+ 终端主题额外的结构样式）
-       data-theme: auto | paper | ink | terminal
-       未知值一律按 auto 处理（浅色 paper / 深色 ink 跟随系统）
-       ================================================================ */
-
-    :root {
-      --font-sans: system-ui, -apple-system, "Noto Sans SC", sans-serif;
-      --font-serif: "Noto Serif SC", "Source Han Serif SC", "Noto Serif", Georgia, serif;
-      --font-mono: "JetBrains Mono", ui-monospace, "Droid Sans Mono", Menlo, monospace;
-      --width: 760px;
-
-      /* ---- Paper：暖白纸张（默认 / auto 浅色） ---- */
-      color-scheme: light;
-      --bg: #faf9f5; --fg: #2b2a27; --muted: #75736c; --border: #e6e3d9;
-      --heading: #1f1e1b; --strong: #1f1e1b;
-      --accent: #c4633f; --link: #b5532f; --marker: #c4633f; --quote: #75736c;
-      --code-bg: #f0eee6; --code-fg: #3d3a35; --inline-code: #a8452a;
-      --font-body: var(--font-serif); --size: 17px; --line: 1.75;
-      --hl-keyword: #a2416b; --hl-string: #4f7a28; --hl-number: #b35d1e; --hl-comment: #9a978d;
-      --hl-title: #3e63a8; --hl-type: #8a5a00; --hl-attr: #7a4fb5;
-    }
-
-    /* ---- Ink：暖黑墨色（auto 深色） ---- */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="paper"]) {
-        color-scheme: dark;
-        --bg: #262624; --fg: #e8e5dc; --muted: #a29f96; --border: #3b3a36;
-        --heading: #f5f3ec; --strong: #f5f3ec;
-        --accent: #d97757; --link: #e08a6c; --marker: #d97757; --quote: #a29f96;
-        --code-bg: #30302d; --code-fg: #e8e5dc; --inline-code: #e8957a;
-        --hl-keyword: #e58fb4; --hl-string: #a8cc7c; --hl-number: #e8a063; --hl-comment: #7d7a72;
-        --hl-title: #8db4f2; --hl-type: #e6c176; --hl-attr: #c3a1f0;
-      }
-    }
-    :root[data-theme="ink"] {
-      color-scheme: dark;
-      --bg: #262624; --fg: #e8e5dc; --muted: #a29f96; --border: #3b3a36;
-      --heading: #f5f3ec; --strong: #f5f3ec;
-      --accent: #d97757; --link: #e08a6c; --marker: #d97757; --quote: #a29f96;
-      --code-bg: #30302d; --code-fg: #e8e5dc; --inline-code: #e8957a;
-      --hl-keyword: #e58fb4; --hl-string: #a8cc7c; --hl-number: #e8a063; --hl-comment: #7d7a72;
-      --hl-title: #8db4f2; --hl-type: #e6c176; --hl-attr: #c3a1f0;
-    }
-
-    /* ---- Terminal：深青终端风（放在最后，覆盖上面的 auto 规则） ---- */
-    :root[data-theme="terminal"] {
-      color-scheme: dark;
-      --bg: #1d2a32; --fg: #d3dae0; --muted: #7f929e; --border: #2e3e48;
-      --heading: #e9a23b; --strong: #ffffff;
-      --accent: #e9a23b; --link: #7cb7ec; --marker: #7f929e; --quote: #8fa3ae;
-      --code-bg: #172229; --code-fg: #d3dae0; --inline-code: #b392f0;
-      --font-body: var(--font-mono); --size: 14px; --line: 1.6; --width: none;
-      --hl-keyword: #c792ea; --hl-string: #a5d6a7; --hl-number: #f78c6c; --hl-comment: #5f7480;
-      --hl-title: #82aaff; --hl-type: #ffcb6b; --hl-attr: #e9a23b;
-    }
-
-    /* ================= 通用排版（所有主题共用，只读变量） ================= */
-    html { background: var(--bg); }
+/* ================= 通用排版（所有主题共用，只读变量） ================= */
     body {
       margin: 0 auto; max-width: var(--width); padding: 16px 18px 48px;
       color: var(--fg); font: var(--size)/var(--line) var(--font-body);
@@ -89,18 +32,7 @@
     th { background: var(--code-bg); color: var(--heading); }
     img { max-width: 100%; }
     hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
-    ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     .fallback-note { color: var(--muted); font-size: .9em; }
-
-    /* ================= 代码高亮：用主题变量着色，不再依赖外部主题 CSS ================= */
-    .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: var(--hl-keyword); }
-    .hljs-string, .hljs-regexp, .hljs-template-string, .hljs-addition { color: var(--hl-string); }
-    .hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
-    .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
-    .hljs-title, .hljs-section, .hljs-name { color: var(--hl-title); }
-    .hljs-type, .hljs-built_in, .hljs-title.class_ { color: var(--hl-type); }
-    .hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable { color: var(--hl-attr); }
-    .hljs-meta { color: var(--hl-comment); }
 
     /* ================= Terminal 结构样式：把 Markdown 标记"显示出来" ================= */
     [data-theme="terminal"] h1, [data-theme="terminal"] h2, [data-theme="terminal"] h3,
@@ -136,10 +68,7 @@
     // 供 Kotlin 通过 evaluateJavascript 实时切换主题（白名单，不接受任意字符串）
     window.setTheme = function (t) {
       if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) {
-        const x = window.scrollX, y = window.scrollY;
         document.documentElement.setAttribute('data-theme', t);
-        // Changing fonts reflows content; preserve the current pixel offset.
-        window.scrollTo(x, y);
       }
     };
 
