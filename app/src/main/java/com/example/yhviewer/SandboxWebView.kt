@@ -1,5 +1,8 @@
 package com.example.yhviewer
 
+import android.animation.ObjectAnimator
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -28,6 +31,7 @@ import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
 import java.io.File
+import kotlin.math.min
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -100,6 +104,7 @@ private class EpubPathHandler(
     context: Context,
     rootDir: File,
     private val theme: () -> ReaderTheme,
+    private val readingCss: () -> String,
 ) : WebViewAssetLoader.PathHandler {
     private val files = WebViewAssetLoader.InternalStoragePathHandler(context, rootDir)
 
@@ -109,7 +114,7 @@ private class EpubPathHandler(
         val isChapter = lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")
         if (!isChapter) return noStoreResponse(res.mimeType, res.encoding, Sandbox.BOOK_CSP, res.data)
         val text = res.data?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return res
-        val injected = EpubInjector.inject(text, theme()).toByteArray(Charsets.UTF_8)
+        val injected = EpubInjector.inject(text, theme(), readingCss()).toByteArray(Charsets.UTF_8)
         return noStoreResponse(res.mimeType, "utf-8", Sandbox.BOOK_CSP, ByteArrayInputStream(injected))
     }
 }
@@ -218,6 +223,9 @@ fun HtmlView(
     onRatioChanged: (Float) -> Unit = {},
     onInternalLink: (String, String?) -> Boolean = { _, _ -> false },
     bookTheme: () -> ReaderTheme = { ReaderTheme.AUTO },
+    reading: String? = null,
+    bookReadingCss: () -> String = { "" },
+    gestures: ReaderGestures? = null,
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
@@ -226,12 +234,14 @@ fun HtmlView(
     val latestOnRatio by rememberUpdatedState(onRatioChanged)
     val latestOnLink by rememberUpdatedState(onInternalLink)
     val latestBookTheme by rememberUpdatedState(bookTheme)
+    val latestBookReading by rememberUpdatedState(bookReadingCss)
+    val latestGestures by rememberUpdatedState(gestures)
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
 
     // One effect handles initial readiness and subsequent changes. In particular, a selection
     // made before page scripts exist is applied once onPageFinished increments pageLoads.
-    LaunchedEffect(theme, wrap, webView, pageLoads) {
+    LaunchedEffect(theme, wrap, reading, webView, pageLoads) {
         val view = webView ?: return@LaunchedEffect
         if (pageLoads == 0) return@LaunchedEffect
         position.reporting = false
@@ -239,10 +249,11 @@ fun HtmlView(
             val updates = buildList {
                 theme?.let { add("window.setTheme && window.setTheme(${MarkdownRenderer.toJsonString(it.id)})") }
                 wrap?.let { add("window.setWrap && window.setWrap($it)") }
+                reading?.let { add("window.setReading && window.setReading(${MarkdownRenderer.toJsonString(it)})") }
             }
             if (updates.isNotEmpty()) view.evaluateJavascript(updates.joinToString(";"), null)
         }
-        if (position.ratio > 0f) view.restoreRatio(position.ratio)
+        view.restoreRatio(position.ratio)
         position.ratio = view.scrollRatio()
         position.reporting = true
         latestOnRatio(position.ratio)
@@ -261,7 +272,7 @@ fun HtmlView(
                     Sandbox.DOC_URL
                 }
                 is PageSource.BookFile -> {
-                    builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir) { latestBookTheme() })
+                    builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir, { latestBookTheme() }, { latestBookReading() }))
                     Sandbox.bookUrl(source.path) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
                 }
             }
@@ -284,6 +295,7 @@ fun HtmlView(
                         latestOnRatio(position.ratio)
                     }
                 }
+                installReaderGestures(context) { latestGestures }
                 loadUrl(startUrl)
                 webView = this
             }
@@ -291,8 +303,53 @@ fun HtmlView(
         onRelease = {
             position.reporting = false
             it.setOnScrollChangeListener(null)
+            it.setOnTouchListener(null)
+            it.animate().cancel()
             webView = null
             it.destroy()
         },
     )
+}
+
+class ReaderGestures(
+    val tapToTurn: Boolean,
+    val onToggleBars: () -> Unit,
+    val onReachEnd: () -> Unit,     // 已在本章末尾还往后翻 → 下一章
+    val onReachStart: () -> Unit,   // 已在本章开头还往前翻 → 上一章末尾
+)
+
+/** 一次翻 90% 屏高：留一点重叠，翻页后还能看到上一屏最后一两行，不会读断 */
+private fun WebView.turnPage(forward: Boolean, g: ReaderGestures) {
+    val step = (height * 0.9f).roundToInt()
+    if (forward) {
+        if (!canScrollVertically(1)) return g.onReachEnd()
+        ObjectAnimator.ofInt(this, "scrollY", scrollY, min(scrollY + step, maxScrollPx())).setDuration(160).start()
+    } else {
+        if (!canScrollVertically(-1)) return g.onReachStart()
+        ObjectAnimator.ofInt(this, "scrollY", scrollY, max(0, scrollY - step)).setDuration(160).start()
+    }
+}
+
+
+@SuppressLint("ClickableViewAccessibility") // 翻页不是"点击控件"，读屏用户仍可用底部栏的上一章 / 下一章
+private fun WebView.installReaderGestures(context: Context, gestures: () -> ReaderGestures?) {
+    val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            val g = gestures() ?: return false
+            // 点在链接上：交给网页处理跳转，不当成翻页
+            val type = hitTestResult.type
+            if (type == WebView.HitTestResult.SRC_ANCHOR_TYPE || type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) return false
+            val x = e.x / width.coerceAtLeast(1)
+            when {
+                !g.tapToTurn || x in 0.3f..0.7f -> g.onToggleBars()
+                x > 0.7f -> turnPage(forward = true, g = g)
+                else -> turnPage(forward = false, g = g)
+            }
+            return true
+        }
+    })
+    setOnTouchListener { _, event ->
+        detector.onTouchEvent(event)
+        false
+    }
 }

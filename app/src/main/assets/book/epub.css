@@ -1,17 +1,24 @@
 /*
  * 注入到每个 EPUB 章节里的阅读样式（配合 /assets/shared/themes.css）。
- * 出版方的 CSS 常常写死黑字白底，所以颜色相关的规则用 !important 覆盖，
- * 排版（字体大小、斜体、居中等）尽量保留原书设计。
+ * 颜色相关规则用 !important 覆盖出版方写死的黑字白底；
+ * 字号通过根字号整体缩放，出版方用 em / % 设置的标题、注释等会按比例跟着变。
+ * --read-* 变量由章节里注入的 <style> 提供（ReadingPrefs.toCss）。这里的默认值用 :where 把优先级降到 0，
+ * 无论两段样式谁先加载，注入的值都会生效。
  */
-html { background: var(--bg) !important; }
+:where(:root) { --read-scale: 1; --read-line: 1.85; --read-margin: 20px; --read-font: var(--font-body); }
+html {
+  background: var(--bg) !important;
+  font-size: calc(100% * var(--read-scale)) !important;
+}
 body {
   background: var(--bg) !important;
   color: var(--fg) !important;
-  font-family: var(--font-body);
-  line-height: 1.85 !important;
+  font-family: var(--read-font) !important;
+  font-size: 1.1rem !important;
+  line-height: var(--read-line) !important;
   max-width: 720px;
   margin: 0 auto !important;
-  padding: 20px 20px 64px !important;
+  padding: 24px var(--read-margin) 48px !important;
   word-wrap: break-word;
   -webkit-text-size-adjust: 100%;
 }
@@ -20,8 +27,11 @@ body * {
   background-color: transparent !important;
   border-color: var(--border) !important;
 }
-h1, h2, h3, h4, h5, h6 { color: var(--heading) !important; line-height: 1.4; }
+p, li, blockquote, div { line-height: inherit !important; }
+/* 正文段落统一跟随设置的字号：出版方常把段落写死成 12px 之类的绝对值，不覆盖的话调字号对正文无效 */
+p, li, dd, dt, blockquote { font-size: inherit !important; }
+h1, h2, h3, h4, h5, h6 { color: var(--heading) !important; line-height: 1.4 !important; }
 a, a * { color: var(--link) !important; }
 img, svg, video { max-width: 100% !important; height: auto !important; }
-pre, code { font-family: var(--font-mono); white-space: pre-wrap; }
+pre, code { font-family: var(--font-mono) !important; white-space: pre-wrap; }
 table { display: block; overflow-x: auto; max-width: 100%; }

@@ -253,7 +253,9 @@ object EpubInjector {
         """<link rel="stylesheet" type="text/css" href="/assets/shared/themes.css"/>""" +
             """<link rel="stylesheet" type="text/css" href="/assets/book/epub.css"/>"""
 
-    fun inject(xhtml: String, theme: ReaderTheme): String {
+    fun inject(xhtml: String, theme: ReaderTheme, readingCss: String = ""): String {
+        require('<' !in readingCss && '&' !in readingCss) { "Unsafe reading CSS for XHTML" }
+        val styles = (if (readingCss.isEmpty()) "" else "<style type=\"text/css\">$readingCss</style>") + LINKS
         val htmlTag = HTML_TAG.find(xhtml) ?: return xhtml
         val attr = " data-theme=\"${theme.id}\""
         val newTag = if (DATA_THEME.containsMatchIn(htmlTag.value)) {
@@ -265,10 +267,10 @@ object EpubInjector {
         var out = xhtml.replaceRange(htmlTag.range, newTag)
         val headClose = HEAD_CLOSE.find(out)
         out = if (headClose != null) {
-            out.replaceRange(headClose.range.first, headClose.range.first, LINKS) // 插在出版方 CSS 之后，优先级更高
+            out.replaceRange(headClose.range.first, headClose.range.first, styles) // 插在出版方 CSS 之后，优先级更高
         } else {
             val afterHtml = htmlTag.range.first + newTag.length
-            out.replaceRange(afterHtml, afterHtml, "<head>$LINKS</head>")
+            out.replaceRange(afterHtml, afterHtml, "<head>$styles</head>")
         }
         return out
     }

@@ -43,6 +43,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ShelfRepository(app, AppDatabase.get(app))
     private val themeStore = ThemeStore(app)
+    private val readingStore = ReadingPrefsStore(app)
     private val prefs = app.getSharedPreferences("reader_prefs", Context.MODE_PRIVATE)
 
     /** 启动时先清理孤儿文件；导入要等它做完，避免误删正在写入的新副本 */
@@ -57,6 +58,14 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var wrap by mutableStateOf(prefs.getBoolean(KEY_WRAP, false))
         private set
+
+    var reading by mutableStateOf(readingStore.load())
+        private set
+
+    fun updateReading(value: ReadingPrefs) {
+        reading = value.normalized()
+        readingStore.save(reading)
+    }
 
     fun selectTheme(t: ReaderTheme) { theme = t; themeStore.save(t) }
     fun toggleWrap() { wrap = !wrap; prefs.edit().putBoolean(KEY_WRAP, wrap).apply() }
@@ -151,17 +160,18 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         PositionWrites.enqueue(repo, doc.bookId, locator, doc.chapterCount)
     }
 
-    fun goToChapter(index: Int, anchor: String? = null) {
+    fun goToChapter(index: Int, anchor: String? = null, atEnd: Boolean = false) {
         val doc = current() ?: return
         if (index !in 0 until doc.chapterCount || index == chapter) return
         chapterAnchor = anchor
         chapter = index
-        ratio = 0f
+        ratio = if (atEnd) 1f else 0f
         flushPosition()
     }
 
     fun nextChapter() = goToChapter(chapter + 1)
     fun prevChapter() = goToChapter(chapter - 1)
+    fun prevChapterFromStart() = goToChapter(chapter - 1, atEnd = true)
 
     /** EPUB 内部链接：指向另一章就切过去；同一章（页内锚点）或不在目录里的文件交给 WebView */
     fun onBookLink(path: String, fragment: String?): Boolean {

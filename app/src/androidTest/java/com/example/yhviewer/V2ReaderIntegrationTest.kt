@@ -102,6 +102,10 @@ class V2ReaderIntegrationTest {
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
         compose.onNode(hasText(label, substring = true)).performClick()
+        // Book themes now live in a sheet; code retains its dropdown.
+        if (compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()) {
+            androidx.test.espresso.Espresso.pressBack()
+        }
     }
     private fun nativeRatio(s: ActivityScenario<MainActivity>): Float {
         var result = -1f
