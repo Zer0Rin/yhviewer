@@ -103,17 +103,17 @@ fun PermissionSheet(permissions: DocPermissions, onChange: (DocPermissions) -> U
  */
 @Composable
 fun PermissionEditor(permissions: DocPermissions, onChange: (DocPermissions) -> Unit) {
-    val tier = PermissionTier.of(permissions)
     val net = AppCapabilities.networkCapable
     val storageSupported = AppCapabilities.persistentStorageSupported
-    val p = permissions
+    val tier = PermissionTier.of(permissions, net, storageSupported)
+    val p = AppCapabilities.effective(permissions)
     val strictReason = "需要 Standard 版（Strict 版不联网）"
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("权限", style = MaterialTheme.typography.titleSmall)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(PermissionTier.STRICT, PermissionTier.STANDARD, PermissionTier.TRUSTED).forEach { t ->
-                FilterChip(selected = tier == t, onClick = { onChange(t.preset!!) }, label = { Text(t.label) })
+                FilterChip(selected = tier == t, onClick = { onChange(AppCapabilities.effective(t.preset!!)) }, label = { Text(t.label) })
             }
             if (tier == PermissionTier.CUSTOM) {
                 FilterChip(selected = true, onClick = {}, label = { Text(PermissionTier.CUSTOM.label) })
@@ -142,11 +142,11 @@ fun PermissionEditor(permissions: DocPermissions, onChange: (DocPermissions) -> 
             p.cdn, enabled = net, reason = if (!net) strictReason else null,
         ) { onChange(p.copy(cdn = it)) }
         PermissionRow(
-            "加载外部图片和字体", "任意 https 地址的图片、字体、音视频",
-            p.externalMedia, enabled = net, reason = if (!net) strictReason else null,
+            "加载外部图片和字体", "⚠ 任意 HTTPS 图片、字体、音视频 URL 都可能携带文档内容并发送到外部服务器",
+            p.externalMedia, enabled = net, reason = if (!net) strictReason else null, warning = true,
         ) { onChange(p.copy(externalMedia = it)) }
         PermissionRow(
-            "嵌入外部页面", "⚠ 嵌入的网页按它自己的规则运行，可以自由联网",
+            "嵌入外部页面", "⚠ 嵌入的网页按它自己的规则运行，可以自由联网；它的 URL 也可能携带文档内容并发送到外部服务器",
             p.frames, enabled = net, reason = if (!net) strictReason else null, warning = true,
         ) { onChange(p.copy(frames = it)) }
         PermissionRow(

@@ -213,6 +213,7 @@ class ReaderThemeIntegrationTest {
     @Test fun htmlHasNoThemeMenuAndItsOwnSetThemeIsNeverCalled() {
         assertTrue(prefs.edit().putString("md_theme", "ink").commit())
         val html = "<h1>Original HTML</h1><script>window.themeCalls=0;window.setTheme=()=>window.themeCalls++</script>"
+        val savedTrusted = AppCapabilities.effective(DocPermissions.TRUSTED)
         launch(document("theme-original.html", html, true), true).use { scenario ->
             waitJs(scenario, "document.readyState==='complete' && typeof window.setTheme==='function'")
             compose.onNodeWithText("Aa").assertDoesNotExist()
@@ -225,7 +226,7 @@ class ReaderThemeIntegrationTest {
                 var changed=false
                 scenario.onActivity { a ->
                     val doc=(androidx.lifecycle.ViewModelProvider(a)[ShelfViewModel::class.java].reader as? ReaderState.Ready)?.doc as? OpenedDoc.Single
-                    changed=doc?.permissions==DocPermissions.TRUSTED
+                    changed=doc?.permissions==savedTrusted
                 }
                 changed
             }
@@ -235,10 +236,13 @@ class ReaderThemeIntegrationTest {
             waitJs(scenario, "document.readyState==='complete' && typeof window.setTheme==='function'")
             scenario.onActivity { a ->
                 val doc=(androidx.lifecycle.ViewModelProvider(a)[ShelfViewModel::class.java].reader as ReaderState.Ready).doc as OpenedDoc.Single
-                assertEquals(DocPermissions.TRUSTED,doc.permissions)
+                assertEquals(savedTrusted,doc.permissions)
                 assertFalse(doc.permissions.frames || doc.permissions.network)
                 val stored=runBlocking { AppDatabase.get(context).bookDao().get(doc.bookId)!! }
-                assertEquals(DocPermissions.TRUSTED.toBits(),stored.permissions)
+                assertEquals(savedTrusted.toBits(),stored.permissions)
+                if (!AppCapabilities.networkCapable) {
+                    assertFalse(DocPermissions.fromBits(stored.permissions).effective(networkCapable = true).needsNetwork)
+                }
             }
             assertEquals("0", js(scenario, "window.themeCalls"))
         }

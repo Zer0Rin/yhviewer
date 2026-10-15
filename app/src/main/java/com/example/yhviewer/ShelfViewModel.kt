@@ -92,14 +92,15 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPermissions(bookId: Long, permissions: DocPermissions) {
         viewModelScope.launch {
+            val bounded = AppCapabilities.effective(permissions)
             // Invalidate storage before suspension so quick regrant cannot reuse a revoked profile.
-            if (!permissions.persistentStorage || !permissions.scripts) DocProfiles.revoke(getApplication(), bookId)
-            repo.setPermissions(bookId, permissions)
+            if (!bounded.persistentStorage || !bounded.scripts) DocProfiles.revoke(getApplication(), bookId)
+            repo.setPermissions(bookId, bounded)
             val cur = current()
             if (cur is OpenedDoc.Single && cur.bookId == bookId) {
                 flushPosition()
                 documentSession++ // stale callbacks from the previous permissions cannot overwrite position
-                reader = ReaderState.Ready(cur.copy(permissions = permissions))
+                reader = ReaderState.Ready(cur.copy(permissions = bounded))
             }
         }
     }

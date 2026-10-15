@@ -13,9 +13,7 @@ import java.util.UUID
 object AppCapabilities {
     val networkCapable: Boolean = BuildConfig.NETWORK_CAPABLE
     val persistentStorageSupported: Boolean get() = DocProfiles.isSupported()
-    fun effective(p: DocPermissions): DocPermissions = p.effective(networkCapable).let {
-        if (persistentStorageSupported) it else it.copy(persistentStorage = false)
-    }
+    fun effective(p: DocPermissions): DocPermissions = p.effective(networkCapable, persistentStorageSupported)
 }
 
 /** UI-thread only. Revocation invalidates the durable name before attempting physical deletion.

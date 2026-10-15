@@ -42,6 +42,28 @@ class DocPermissionsTest {
         assertEquals(PermissionTier.CUSTOM, PermissionTier.of(DocPermissions.TRUSTED.copy(frames = true)))
     }
 
+    @Test fun strictSavedTrustedDoesNotGainNetworkAfterStandardReload() {
+        val saved = DocPermissions.TRUSTED.effective(networkCapable = false)
+        val reopened = DocPermissions.fromBits(saved.toBits()).effective(networkCapable = true)
+        assertFalse(reopened.needsNetwork)
+        assertEquals(DocPermissions.TRUSTED.copy(cdn = false, externalMedia = false), reopened)
+    }
+
+    @Test fun scriptsOffSaveCannotRestoreStorageOrNavigationWhenReenabled() {
+        val saved = DocPermissions.TRUSTED.copy(scripts = false).effective(networkCapable = true)
+        val reopened = DocPermissions.fromBits(saved.toBits()).copy(scripts = true).effective(networkCapable = true)
+        assertFalse(reopened.persistentStorage)
+        assertFalse(reopened.scriptedNavigation)
+    }
+
+    @Test fun boundedTrustedPresetKeepsTrustedTier() {
+        for (network in listOf(false, true)) for (storage in listOf(false, true)) {
+            val saved = DocPermissions.TRUSTED.effective(network, storage)
+            assertEquals(PermissionTier.TRUSTED, PermissionTier.of(saved, network, storage))
+            assertEquals(PermissionTier.CUSTOM, PermissionTier.of(DocPermissions.TRUSTED.copy(frames = true), network, storage))
+        }
+    }
+
     // ---------- 生效规则 ----------
 
     @Test fun strictBuildDropsNetworkPermissions() {
@@ -55,6 +77,12 @@ class DocPermissionsTest {
         val e = DocPermissions(scripts = false, persistentStorage = true, scriptedNavigation = true).effective(true)
         assertFalse(e.persistentStorage)
         assertFalse(e.scriptedNavigation)
+    }
+
+    @Test fun unsupportedStorageIsClearedFromNewGrant() {
+        val saved = DocPermissions.TRUSTED.effective(networkCapable = true, persistentStorageSupported = false)
+        assertFalse(saved.persistentStorage)
+        assertFalse(DocPermissions.fromBits(saved.toBits()).effective(true).persistentStorage)
     }
 
     @Test fun relaxedFlag() {

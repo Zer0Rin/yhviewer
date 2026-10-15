@@ -30,9 +30,10 @@ data class DocPermissions(
      *  - Strict 版（没有 INTERNET 权限）去掉所有联网类权限
      *  - 本地数据、脚本跳转都依赖脚本，脚本关闭时一并失效
      */
-    fun effective(networkCapable: Boolean): DocPermissions {
+    fun effective(networkCapable: Boolean, persistentStorageSupported: Boolean = true): DocPermissions {
         var p = this
         if (!networkCapable) p = p.copy(cdn = false, externalMedia = false, frames = false, network = false)
+        if (!persistentStorageSupported) p = p.copy(persistentStorage = false)
         if (!p.scripts) p = p.copy(persistentStorage = false, scriptedNavigation = false)
         return p
     }
@@ -88,8 +89,16 @@ enum class PermissionTier(val label: String, val preset: DocPermissions?) {
     ;
 
     companion object {
-        /** 正好等于某个预设就显示那个档位，否则是"自定义" */
-        fun of(p: DocPermissions): PermissionTier = entries.firstOrNull { it.preset == p } ?: CUSTOM
+        /** 与原始预设或当前能力下的预设一致时显示该档位；先比较原值以保留旧授权的身份。 */
+        fun of(
+            p: DocPermissions,
+            networkCapable: Boolean = true,
+            persistentStorageSupported: Boolean = true,
+        ): PermissionTier = entries.firstOrNull { tier ->
+            tier.preset?.let { preset ->
+                p == preset || p == preset.effective(networkCapable, persistentStorageSupported)
+            } == true
+        } ?: CUSTOM
     }
 }
 
