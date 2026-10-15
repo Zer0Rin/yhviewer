@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown</title>
+  <!-- 代码高亮主题：跟随系统深浅色。路径对应 app/src/main/assets/md/ -->
+  <link rel="stylesheet" href="/assets/md/github.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="/assets/md/github-dark.min.css" media="(prefers-color-scheme: dark)">
+  <style>
+    /* 默认阅读主题：全部用 CSS 变量，以后"轻调"档直接复用、覆盖这些变量即可 */
+    :root {
+      color-scheme: light dark;
+      --bg: #fbfaf7; --fg: #1f2328; --muted: #656d76; --border: #d8dee4;
+      --code-bg: #f2f1ec; --accent: #2f6fd8; --quote: #8a8f98;
+      --font: system-ui, -apple-system, "Noto Sans SC", sans-serif;
+      --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+      --size: 16px; --line: 1.75; --width: 760px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16171a; --fg: #e6e6e6; --muted: #9aa0a6; --border: #30343a;
+        --code-bg: #22252b; --accent: #7aa2ff; --quote: #8b929c;
+      }
+    }
+    html { background: var(--bg); }
+    body {
+      margin: 0 auto; max-width: var(--width); padding: 16px 18px 48px;
+      color: var(--fg); font: var(--size)/var(--line) var(--font);
+      word-wrap: break-word;
+    }
+    h1, h2, h3, h4 { line-height: 1.3; margin: 1.6em 0 .6em; }
+    h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+    h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+    h3 { font-size: 1.15em; }
+    body > :first-child { margin-top: 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:active { text-decoration: underline; }
+    code { font-family: var(--mono); font-size: .88em; background: var(--code-bg);
+           padding: .15em .35em; border-radius: 4px; }
+    pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px;
+          overflow-x: auto; line-height: 1.5; }
+    pre code { background: none; padding: 0; font-size: .85em; }
+    pre.hljs { background: var(--code-bg); }   /* 统一背景，别让高亮主题自带的底色抢戏 */
+    blockquote { margin: 1em 0; padding: 0 1em; color: var(--quote);
+                 border-left: 3px solid var(--border); }
+    table { display: block; overflow-x: auto; border-collapse: collapse; margin: 1em 0; }
+    th, td { border: 1px solid var(--border); padding: 6px 10px; }
+    th { background: var(--code-bg); }
+    img { max-width: 100%; }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+    .fallback-note { color: var(--muted); font-size: .9em; }
+  </style>
+</head>
+<body>
+  <main id="content"></main>
+
+  <!-- Kotlin 会把这里替换成 JSON 字符串（所有 "<" 已转成 \u003c，无法提前闭合 script 标签） -->
+  <script type="application/json" id="md-src">/*MD_JSON*/</script>
+
+  <script src="/assets/md/markdown-it.min.js"></script>
+  <script src="/assets/md/highlight.min.js"></script>
+  <script>
+    (function () {
+      const src = JSON.parse(document.getElementById('md-src').textContent);
+      const out = document.getElementById('content');
+
+      // 库没加载上（比如文件忘了放）：退回纯文本，至少能读
+      if (!window.markdownit) {
+        const note = document.createElement('p');
+        note.className = 'fallback-note';
+        note.textContent = '⚠ markdown-it 未加载，以纯文本显示';
+        const pre = document.createElement('pre');
+        pre.textContent = src;
+        out.append(note, pre);
+        return;
+      }
+
+      const md = window.markdownit({
+        html: false,      // 关键：md 里的原始 HTML（含 <script>）一律转义成文本
+        linkify: true,    // 裸网址自动变链接
+        typographer: false,
+        highlight(code, lang) {
+          if (window.hljs && lang && hljs.getLanguage(lang)) {
+            try {
+              return '<pre class="hljs"><code>' +
+                hljs.highlight(code, { language: lang, ignoreIllegals: true }).value +
+                '</code></pre>';
+            } catch (_) { /* 落到默认渲染 */ }
+          }
+          return ''; // 返回空串 = 用 markdown-it 默认的转义渲染
+        },
+      });
+
+      out.innerHTML = md.render(src);
+
+      // 用第一个标题当页面标题
+      const h = out.querySelector('h1, h2');
+      if (h) document.title = h.textContent;
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Local IDE and build-tool state
+*.iml
+.idea/
+.gradle/
+.kotlin/
+local.properties
+.DS_Store
+
+# Generated output (all modules)
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Private signing material
+*.jks
+*.keystore
+keystore.properties

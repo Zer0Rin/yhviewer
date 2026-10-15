@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sandbox Test</title>
+  <style>
+    :root { color-scheme: light dark; --pass: #2a9d4b; --fail: #d64545; --wait: #999; }
+    body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; line-height: 1.5; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border-bottom: 1px solid #8884; padding: 6px 4px; text-align: left; vertical-align: top; }
+    .PASS { color: var(--pass); font-weight: 600; }
+    .FAIL { color: var(--fail); font-weight: 600; }
+    .WAIT { color: var(--wait); }
+    small { opacity: .7; }
+    #summary { font-size: 18px; margin: 12px 0; }
+    a { display: inline-block; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h1>沙箱测试</h1>
+  <div id="summary" class="WAIT">测试中…</div>
+  <table>
+    <thead><tr><th>#</th><th>测试项</th><th>结果</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2>手动测试</h2>
+  <p>1. 点这个链接，应该跳到<b>系统浏览器</b>（不是在本页打开）：<br>
+    <a href="https://example.com/">https://example.com/</a></p>
+  <p>2. 页面加载 5 秒后会尝试<b>脚本自动跳转</b>到外网。5 秒后本页仍在 = 拦截成功。
+    <span id="redirect" class="WAIT">等待中…</span></p>
+
+  <script>
+    // 约定：每个 test 返回 'PASS' / 'FAIL' 及说明。期望的是"被拦住"。
+    const TIMEOUT = 4000;
+    const withTimeout = (p, onTimeout) =>
+      Promise.race([p, new Promise(r => setTimeout(() => r(onTimeout), TIMEOUT))]);
+
+    let cspViolations = 0;
+    document.addEventListener('securitypolicyviolation', () => cspViolations++);
+
+    const tests = [
+      ['JS 正常运行', async () => ['PASS', '']],
+
+      ['外网图片', () => withTimeout(new Promise(r => {
+        const img = new Image();
+        img.onload = () => r(['FAIL', '图片加载成功了']);
+        img.onerror = () => r(['PASS', '加载失败']);
+        img.src = 'https://www.google.com/favicon.ico?t=' + Date.now();
+      }), ['PASS', '超时未加载'])],
+
+      ['fetch 外网', () => withTimeout(
+        fetch('https://example.com/', { mode: 'no-cors' })
+          .then(() => ['FAIL', '请求发出去了'])
+          .catch(e => ['PASS', e.message]),
+        ['PASS', '超时'])],
+
+      ['fetch file://', () => withTimeout(
+        fetch('file:///sdcard/Download/hello.html')
+          .then(() => ['FAIL', '读到了本地文件'])
+          .catch(e => ['PASS', e.message]),
+        ['PASS', '超时'])],
+
+      ['fetch content://', () => withTimeout(
+        fetch('content://com.android.externalstorage.documents/document/primary%3ADownload%2Fhello.html')
+          .then(() => ['FAIL', '读到了 content'])
+          .catch(e => ['PASS', e.message]),
+        ['PASS', '超时'])],
+
+      ['WebSocket', () => withTimeout(new Promise(r => {
+        try {
+          const ws = new WebSocket('wss://echo.websocket.org');
+          ws.onopen = () => { r(['FAIL', '连上了']); ws.close(); };
+          ws.onerror = () => r(['PASS', '连接失败']);
+        } catch (e) { r(['PASS', e.message]); }
+      }), ['PASS', '超时未连接'])],
+
+      ['外部 iframe', () => withTimeout(new Promise(r => {
+        const f = document.createElement('iframe');
+        f.style.display = 'none';
+        f.src = 'https://example.com/';
+        document.body.appendChild(f);
+        // iframe 被 CSP 拦时 onload 依然可能触发，所以这里看 CSP 违规事件
+        setTimeout(() => r(cspViolations > 0 ? ['PASS', 'CSP 已拦截'] : ['FAIL', '未见 CSP 拦截']), 1500);
+      }), ['FAIL', '超时'])],
+
+      ['localStorage 文档间隔离', async () => {
+        try {
+          const prev = localStorage.getItem('sandbox-test-mark');
+          localStorage.setItem('sandbox-test-mark', new Date().toLocaleTimeString());
+          return prev
+            ? ['FAIL', '读到了上次打开写入的值：' + prev]
+            : ['PASS', '无残留（关掉再打开一次本文件，仍应 PASS）'];
+        } catch (e) {
+          return ['FAIL', 'localStorage 不可用：' + e.message];
+        }
+      }],
+
+      ['CSP 头已生效', async () =>
+        cspViolations > 0 ? ['PASS', `共 ${cspViolations} 次违规被拦`] : ['FAIL', '没有触发任何 CSP 拦截']],
+    ];
+
+    (async () => {
+      const rows = document.getElementById('rows');
+      const results = [];
+      for (const [i, [name, fn]] of tests.entries()) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${i + 1}</td><td>${name}</td><td class="WAIT">…</td>`;
+        rows.appendChild(tr);
+        let status, note;
+        try { [status, note] = await fn(); } catch (e) { [status, note] = ['FAIL', '测试异常：' + e.message]; }
+        tr.lastElementChild.className = status;
+        tr.lastElementChild.innerHTML = `${status}<br><small>${note}</small>`;
+        results.push({ name, status, note });
+      }
+      const failed = results.filter(r => r.status !== 'PASS').length;
+      const s = document.getElementById('summary');
+      s.className = failed ? 'FAIL' : 'PASS';
+      s.textContent = failed ? `${failed} 项未通过` : `全部 ${results.length} 项通过`;
+      // 给设备测试读取：webView.evaluateJavascript("JSON.stringify(window.__sandboxResult)")
+      window.__sandboxResult = { failed, results };
+    })();
+
+    setTimeout(() => {
+      location.href = 'https://example.com/?auto-redirect';
+      setTimeout(() => {
+        const el = document.getElementById('redirect');
+        el.className = 'PASS';
+        el.textContent = 'PASS：仍在本页';
+      }, 1000);
+    }, 5000);
+  </script>
+</body>
+</html>

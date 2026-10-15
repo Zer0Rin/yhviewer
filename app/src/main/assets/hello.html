@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello Reader</title>
+  <style>
+    :root { --bg: #fafaf7; --fg: #222; --card: #fff; --accent: #3b6fd8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #16171a; --fg: #e6e6e6; --card: #22242a; --accent: #7aa2ff; }
+    }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+           font-family: system-ui, sans-serif; line-height: 1.6; }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+             padding: 8px 16px; font-size: 16px; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border-bottom: 1px solid #8884; padding: 6px; text-align: left; }
+    .ok { color: #2a9d4b; } .bad { color: #d64545; }
+  </style>
+</head>
+<body>
+  <h1>HTML Reader · 第 1 步</h1>
+
+  <div class="card">
+    <b>JS 状态：</b><span id="js" class="bad">JS 没有运行</span>
+  </div>
+
+  <div class="card">
+    <p>交互测试：</p>
+    <button id="btn">点我</button> 已点 <b id="count">0</b> 次
+  </div>
+
+  <div class="card">
+    <p>深色模式测试：切换系统深色模式，这页颜色应跟着变。</p>
+    <table>
+      <tr><th>检查项</th><th>预期</th></tr>
+      <tr><td>页面显示</td><td>看到这张表</td></tr>
+      <tr><td>JS</td><td>上方显示绿色"JS 正常"</td></tr>
+      <tr><td>按钮</td><td>计数增加</td></tr>
+      <tr><td>返回键</td><td>直接退出 App（目前只有一页）</td></tr>
+    </table>
+  </div>
+
+  <script>
+    const js = document.getElementById('js');
+    js.textContent = 'JS 正常';
+    js.className = 'ok';
+    let n = 0;
+    document.getElementById('btn').onclick = () => {
+      document.getElementById('count').textContent = ++n;
+    };
+  </script>
+</body>
+</html>
