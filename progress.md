@@ -10,3 +10,7 @@ Full suite: 25 device tests passed (0 failures), including all supplied 14 Room/
 Manual acceptance: installed final APK, confirmed empty shelf, imported dedicated Markdown fixture; snapshotted DB/private file; force-stopped process, deleted own original, cold-started, selected shelf entry and read intact rendered copy. Metadata identity and file bytes match after restart.
 
 Acceptance complete: 15 JVM +25 device passed; APK has no INTERNET; schema v1 validated; source deletion +real force-stop/restart proven by metadata/file snapshots and screen. No blocking code changes needed beyond package/theme/dependency integration. One manual UiAutomator dump returned a null root; screenshot and database snapshots provided independent evidence.
+
+2026-10-15 portfolio preparation: retain YHViewer name, choose yhviewer repository name and MIT. Audited 40-test breakdown; corrected sandbox isolation claims and JSON escaping prose. Screenshot capture pending.
+
+Portfolio materials complete: README test table matches saved XML (15 JVM +25 device, zero failures/skips), MIT added, four native 1080×2400 captures visually checked and each <300 KB. Sandbox capture shows actual 9/9 PASS. Demo fixtures/recency are disclosed; original database and private file bytes restored and checked. GitHub publication/rendering remains pending. No app source changes or new full test run in this documentation task.

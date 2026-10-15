@@ -9,3 +9,5 @@ Goal: integrate supplied shelf code, verify persistence/navigation/UI, retain of
 Constraints: preserve YHViewerTheme and no INTERNET; no duplicate import on recreation; supplied tests isolate DAO/repository storage. Room 2 artifacts (androidx.room), not a Room 3 migration. No known planned exceptions.
 
 Errors: one manual UiAutomator dump returned null root; resolved with screenshot and DB/private-copy snapshots. No build or test failures.
+
+5. Portfolio README, MIT license and four native screenshots — complete
