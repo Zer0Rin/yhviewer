@@ -149,8 +149,6 @@ cd yhviewer
 ./gradlew :app:connectedDebugAndroidTest --no-configuration-cache
 ```
 
-The clone URL above is the chosen publication target; this repository has not been pushed there yet.
-
 Open the project in Android Studio or configure your SDK path locally. The project pins **AGP 9.4.0**, **Gradle 9.6.0**, **compile/target SDK 37**, and a **JDK 25 daemon toolchain**; `minSdk` is **26**. The wrapper/toolchain may download dependencies during development. The installed app itself stays offline. Only the API 37 emulator has been verified so far.
 
 The missing-library acceptance run temporarily renames `assets/md/markdown-it.min.js`, rebuilds, and runs `MarkdownRenderingIntegrationTest#libraryAvailabilityMatchesBuildVariant` with `missingMarkdown=true`. Restore the file and rebuild the normal APK afterwards. For the network-permission sandbox run, use `SandboxIntegrationTest` with `expectInternet=true` and a temporary debug Manifest permission, then remove it. See the step verification records for details.
