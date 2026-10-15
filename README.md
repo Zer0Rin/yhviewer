@@ -28,7 +28,8 @@ YHViewer treats every file as **untrusted content**. It opens it in a locked-dow
 
 - **Open from anywhere**: "Open with" from compatible file managers, "Share" from other apps, or the built-in picker.
 - **Sandboxed rendering**: no network, no file system access, no JS bridge. External links only open on a real user tap (see [Security model](#security-model)).
-- **Markdown support**: rendered by markdown-it with syntax highlighting, Paper / Ink / Terminal themes, a system-following option and an offline bundle. Raw HTML inside Markdown is escaped.
+- **Markdown support**: offline markdown-it rendering with highlight.js syntax highlighting. Raw HTML inside Markdown is escaped.
+- **Markdown reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Switching is instant and keeps your scroll position, and highlight.js colors follow the theme.
 - **Shelf**: recent files, favorites and search. Files are copied on import, so they stay readable after the source is deleted or the app restarts.
 - **Lightweight**: uses the system WebView, no bundled browser engine, and the APK declares **no `INTERNET` permission**.
 
@@ -131,7 +132,7 @@ Step-by-step verification logs: [docs/verification/](docs/verification/), includ
 | `MarkdownRenderingIntegrationTest` | Instrumented | 2 | Rendering structure, highlighting/colors, JSON round trip, script safety, remote-image CSP, wide-table scrolling, browser handoff and library/fallback build variants |
 | `ExampleInstrumentedTest` | Instrumented | 1 | Generated application-context/package smoke test |
 
-The **51 tests include the two generated smoke tests**. Re-running a case in dark mode, with a missing library, or with temporary network permission does not add another test to this count. Last full run: **21 JVM + 30 instrumented, zero failures or skips**, on an API 37 emulator.
+The **51 tests include the two generated smoke tests**. Re-running a case in dark mode, with a missing library, or with temporary network permission does not add another test to this count. Verified locally on an **API 37** emulator and in GitHub Actions on **API 34**: **21 JVM + 30 instrumented, zero failures or skips**.
 
 The theme choice was also checked across a real process stop and cold start; see [reader theme verification](docs/verification/READER_THEMES.md).
 
@@ -192,6 +193,7 @@ app/schemas/                   # exported Room schema (v1)
 
 ## Limitations & roadmap
 
+- [x] **Reading themes**: Paper, Ink, Terminal and Auto, with persistent selection and live switching
 - [ ] **Per-document "allow network" toggle** so CDN-based charts can render, opt-in per file
 - [ ] **Reading controls**: adjustable font, size, width and accent on top of the preset themes
 - [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
