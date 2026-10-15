@@ -107,12 +107,9 @@
     [data-theme="terminal"] h4, [data-theme="terminal"] h5, [data-theme="terminal"] h6 {
       font-size: 1em; font-weight: 700; border: 0; padding: 0; margin: 1.5em 0 .9em;
     }
-    [data-theme="terminal"] h1::before { content: "# "; }
-    [data-theme="terminal"] h2::before { content: "## "; }
-    [data-theme="terminal"] h3::before { content: "### "; }
-    [data-theme="terminal"] h4::before { content: "#### "; }
-    [data-theme="terminal"] h5::before { content: "##### "; }
-    [data-theme="terminal"] h6::before { content: "###### "; }
+    /* 不显示 # 号，层级靠字号区分（等宽字体下差距保持克制） */
+    [data-theme="terminal"] h1 { font-size: 1.3em; }
+    [data-theme="terminal"] h2 { font-size: 1.15em; }
     [data-theme="terminal"] ul { list-style: none; padding-left: 1.4em; }
     [data-theme="terminal"] ul > li { position: relative; }
     [data-theme="terminal"] ul > li::before { content: "-"; position: absolute; left: -1.2em; color: var(--marker); }

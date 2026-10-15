@@ -24,7 +24,7 @@ BUILD SUCCESSFUL. Download-free local XML reports checked: **21 JVM + 30 instrum
 
 The 5 new device cases cover:
 
-1. All four menu choices, same WebView identity and JS sentinel, 600 CSS-pixel scroll position, no document-wide horizontal overflow, independently scrollable wide tables, theme-consistent highlighting, terminal markers/underlined links and invalid JS theme rejection.
+1. All four menu choices, same WebView identity and JS sentinel, 600 CSS-pixel scroll position, no document-wide horizontal overflow, independently scrollable wide tables, theme-consistent highlighting, terminal list/quote markers, heading sizes and underlined links and invalid JS theme rejection.
 2. Ink on a light system has dark code blocks; AUTO tracks both system modes; Paper stays light on a dark system.
 3. Theme selection survives closing and reopening the Activity with a new ViewModel.
 4. HTML has no Aa control and its own `setTheme()` is never called.
@@ -40,8 +40,14 @@ Installed the normal debug APK after instrumentation. Opened `render-test.md` fr
 
 The sample shelf was restored from its existing backup after the device test runner's app installation/cleanup. The displayed fixture is the existing rendering test document.
 
-| Paper | Ink on a light system | Terminal after cold start |
+| Paper | Ink on a light system | Terminal |
 |---|---|---|
 | ![](../screenshots/theme-paper.png) | ![](../screenshots/theme-ink.png) | ![](../screenshots/theme-terminal.png) |
 
 These are unedited native emulator screenshots. Demo status bar: 09:30, full battery, notifications hidden; demo settings restored after capture. App-bar recoloring and optional fonts remain out of scope.
+
+## Terminal heading revision
+
+Removed the six heading-prefix pseudo-elements. H1 is now 1.3em, H2 is 1.15em, and H3–H6 remain 1em; amber and bold are retained. List `-` and quote `>` markers remain unchanged.
+
+The existing theme-switch device case now checks all six heading levels, sizes, amber/bold styling, unchanged list/quote markers and link underlines, along with its existing no-reload/scroll assertions. It failed against the old prefixes before the CSS change. The revised case passes locally on API 37; the repository CI runs the full suite on API 34. No test cases were added, so the total remains 51. The Terminal screenshot is refreshed for this revision.

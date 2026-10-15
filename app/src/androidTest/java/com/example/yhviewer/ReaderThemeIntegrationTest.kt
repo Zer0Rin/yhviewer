@@ -102,7 +102,7 @@ class ReaderThemeIntegrationTest {
         "document.documentElement.getAttribute('data-theme')", "\"$id\"")
 
     @Test fun menuSwitchesAllThemesWithoutReloadOrScrollLoss() {
-        val markdown = source + "\n\n| Wide | Value |\n|---|---|\n| Width | " + "W".repeat(160) + " |\n" +
+        val markdown = source + "\n\n### Third level\n\n#### Fourth level\n\n##### Fifth level\n\n###### Sixth level\n\n| Wide | Value |\n|---|---|\n| Width | " + "W".repeat(160) + " |\n" +
             (1..70).joinToString("\n\n") { "Paragraph $it: enough content to retain a mid-document scroll position in every theme." }
         launch(document("theme-switch.md", markdown)).use { scenario ->
             ready(scenario)
@@ -127,7 +127,22 @@ class ReaderThemeIntegrationTest {
             }
             select("终端")
             theme(scenario, "terminal")
-            assertEquals("true", js(scenario, "getComputedStyle(document.querySelector('h1'),'::before').content.includes('#') && getComputedStyle(document.querySelector('a')).textDecorationLine.includes('underline')"))
+            assertEquals("true", js(scenario, """
+                (() => {
+                    const style = el => getComputedStyle(el);
+                    const size = el => parseFloat(style(el).fontSize);
+                    const body = size(document.body);
+                    const heads = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')];
+                    return heads.every(h => !getComputedStyle(h, '::before').content.includes('#')
+                        && style(h).color === 'rgb(233, 162, 59)' && style(h).fontWeight === '700')
+                        && Math.abs(size(document.querySelector('h1')) / body - 1.3) < .01
+                        && Math.abs(size(document.querySelector('h2')) / body - 1.15) < .01
+                        && [...document.querySelectorAll('h3,h4,h5,h6')].every(h => Math.abs(size(h) - body) < .1)
+                        && getComputedStyle(document.querySelector('ul > li'), '::before').content.includes('-')
+                        && getComputedStyle(document.querySelector('blockquote'), '::before').content.includes('>')
+                        && style(document.querySelector('a')).textDecorationLine.includes('underline');
+                })()
+            """.trimIndent()))
         }
     }
 
