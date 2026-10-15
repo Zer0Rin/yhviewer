@@ -97,11 +97,14 @@ class ShelfUiTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("beta.md").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithContentDescription("取消收藏").assertIsDisplayed()
                 compose.onNodeWithText("Alpha_a_b.html").performTouchInput { longClick() }
-                waitText("从书架移除？")
+                waitText("从书架移除")
+                compose.onNodeWithText("从书架移除").performClick()
                 compose.onNodeWithText("取消").performClick()
+                androidx.test.espresso.Espresso.pressBack()
                 compose.onNodeWithText("Alpha_a_b.html").assertIsDisplayed()
                 compose.onNodeWithText("Alpha_a_b.html").performTouchInput { longClick() }
-                waitText("从书架移除？")
+                waitText("从书架移除")
+                compose.onNodeWithText("从书架移除").performClick()
                 compose.onNodeWithText("移除").performClick()
                 waitText("没有匹配的文档")
                 assertNull(runBlocking { dao.findBySource(alpha.toString()) })

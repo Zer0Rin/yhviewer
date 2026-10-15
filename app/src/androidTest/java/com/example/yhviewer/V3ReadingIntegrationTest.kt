@@ -96,7 +96,13 @@ class V3ReadingIntegrationTest {
         compose.waitUntil(10_000) { var yes = false; s.onActivity { a -> yes = web(a.window.decorView)!!.contentHeight > 1000 }; yes }
         // Initial layout restores only after three stable height samples.
         instrumentation.waitForIdleSync()
-        Thread.sleep(600)
+        compose.waitUntil(10_000) {
+            scroll(s, .01f)
+            var reporting = false
+            s.onActivity { a -> reporting = ViewModelProvider(a)[ShelfViewModel::class.java].initialRatio() > .005f }
+            reporting
+        }
+        scroll(s, 0f)
     }
     private fun tap(s: ActivityScenario<MainActivity>, x: Float, double: Boolean = false, hold: Boolean = false) {
         val duration = if (hold) ViewConfiguration.getLongPressTimeout() + 100L else 30L
@@ -152,7 +158,7 @@ class V3ReadingIntegrationTest {
             s.onActivity { a -> assertEquals(0, web(a.window.decorView)!!.scrollY) }
             tap(s, .9f, hold=true)
             s.onActivity { a -> assertEquals(0, web(a.window.decorView)!!.scrollY) }
-            androidx.test.espresso.Espresso.pressBack() // dismiss selection action mode
+            js(s, "window.getSelection().removeAllRanges()")
             s.onActivity { a -> ViewModelProvider(a)[ShelfViewModel::class.java].goToChapter(1) }
             ready(s)
             tap(s, .1f)

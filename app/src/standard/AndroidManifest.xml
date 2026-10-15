@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  只属于 standard 版的清单，构建时和 main 里的清单合并。
+  strict 版没有这个文件，所以永远不含 INTERNET 权限（CI 和发布流程会检查最终 APK）。
+  放在 app/src/standard/AndroidManifest.xml
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

@@ -48,7 +48,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 启动时先清理孤儿文件；导入要等它做完，避免误删正在写入的新副本 */
     private val startup = viewModelScope.async {
-        try { repo.cleanOrphans(); null }
+        try { repo.cleanOrphans(); DocProfiles.cleanup(app, repo.idsWithPersistentStorage()); null }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { e }
     }
@@ -85,7 +85,24 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     fun updateQuery(q: String) { query = q }
     fun toggleFavoritesOnly() { favoritesOnly = !favoritesOnly }
     fun toggleFavorite(book: Book) { viewModelScope.launch { repo.setFavorite(book.id, !book.favorite) } }
-    fun delete(book: Book) { viewModelScope.launch { repo.delete(book.id) } }
+    fun delete(book: Book) { viewModelScope.launch {
+        DocProfiles.revoke(getApplication(), book.id)
+        repo.delete(book.id)
+    } }
+
+    fun setPermissions(bookId: Long, permissions: DocPermissions) {
+        viewModelScope.launch {
+            // Invalidate storage before suspension so quick regrant cannot reuse a revoked profile.
+            if (!permissions.persistentStorage || !permissions.scripts) DocProfiles.revoke(getApplication(), bookId)
+            repo.setPermissions(bookId, permissions)
+            val cur = current()
+            if (cur is OpenedDoc.Single && cur.bookId == bookId) {
+                flushPosition()
+                documentSession++ // stale callbacks from the previous permissions cannot overwrite position
+                reader = ReaderState.Ready(cur.copy(permissions = permissions))
+            }
+        }
+    }
 
     // ---------------- 导航 + 阅读 ----------------
     var screen by mutableStateOf<Screen>(Screen.Shelf)

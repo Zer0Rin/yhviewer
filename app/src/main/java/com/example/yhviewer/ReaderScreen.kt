@@ -81,6 +81,7 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     val doc = (state as? ReaderState.Ready)?.doc as? OpenedDoc.Single
     val type = doc?.doc?.type
     var menuOpen by remember { mutableStateOf(false) }
+    var permissionsOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -89,6 +90,10 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                 title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                 actions = {
+                    if (doc != null && type == DocType.HTML) {
+                        if (AppCapabilities.effective(doc.permissions).isRelaxed) Text("已放宽", color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { permissionsOpen = true }) { Text("权限") }
+                    }
                     if (doc != null && type != DocType.HTML) { // 原样 HTML 不套主题
                         Box {
                             TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读主题" }) { Text("Aa") }
@@ -120,13 +125,16 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
             is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m)
         }
     }
+    if (permissionsOpen && doc != null && type == DocType.HTML) {
+        PermissionSheet(doc.permissions, { vm.setPermissions(doc.bookId, it) }, { permissionsOpen = false })
+    }
 }
 
 @Composable
 private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: Modifier) {
     val context = LocalContext.current
     val session = vm.documentSession
-    key(vm.documentSession, doc.bookId) {
+    key(vm.documentSession, doc.bookId, doc.permissions) {
         val html = remember(doc) { doc.doc.toDisplayHtml(context, vm.theme, vm.wrap) }
         HtmlView(
             source = PageSource.Html(html),
@@ -135,6 +143,8 @@ private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: M
             wrap = vm.wrap.takeIf { doc.doc.type in setOf(DocType.CODE, DocType.UNKNOWN) },
             initialRatio = vm.initialRatio(),
             onRatioChanged = { vm.onScroll(session, 0, it) },
+            permissions = if (doc.doc.type == DocType.HTML) doc.permissions else DocPermissions.STANDARD,
+            storageProfileId = doc.bookId.takeIf { doc.doc.type == DocType.HTML },
         )
     }
 }

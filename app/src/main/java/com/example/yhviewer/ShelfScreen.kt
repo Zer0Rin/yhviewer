@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +45,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
     val books by vm.books.collectAsState()
-    var pendingDelete by remember { mutableStateOf<Book?>(null) }
+    var sheetBook by remember { mutableStateOf<Book?>(null) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -87,7 +86,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
                         BookRow(
                             book = book,
                             onClick = { vm.openBook(book.id) },
-                            onLongClick = { pendingDelete = book },
+                            onLongClick = { sheetBook = book },
                             onToggleFavorite = { vm.toggleFavorite(book) },
                         )
                         HorizontalDivider()
@@ -97,17 +96,14 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
         }
     }
 
-    pendingDelete?.let { book ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("从书架移除？") },
-            text = { Text("「${book.name}」的本地副本会被删除，原文件不受影响。") },
-            confirmButton = {
-                TextButton(onClick = { vm.delete(book); pendingDelete = null }) { Text("移除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+    sheetBook?.let { selected ->
+        val book = books?.firstOrNull { it.id == selected.id } ?: selected
+        DocumentSheet(
+            book = book,
+            onToggleFavorite = { vm.toggleFavorite(book) },
+            onDelete = { vm.delete(book); sheetBook = null },
+            onPermissions = { vm.setPermissions(book.id, it) },
+            onDismiss = { sheetBook = null },
         )
     }
 }

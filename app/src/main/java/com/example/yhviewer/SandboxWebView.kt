@@ -9,11 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
-import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -37,9 +35,9 @@ import kotlin.math.roundToInt
 
 /**
  * 沙箱的四道门（纵深防御，任何一道失效，其他几道仍然挡得住）：
- *  1. 系统权限：Manifest 不声明 INTERNET
+ *  1. 系统权限：Strict 不声明 INTERNET；Standard 默认拒绝外网，按每份 HTML 授权
  *  2. WebView 设置：禁止 file:// 和 content://，不开 JS 桥，不允许自动弹窗；EPUB 章节直接关闭 JS
- *  3. 请求拦截：shouldInterceptRequest 只放行虚拟域名，其余一律 403
+ *  3. 请求拦截：私有虚拟域名 + 权限允许的 HTTPS 主机，其余 403
  *  4. CSP 响应头：我们自己的模板允许内联脚本；EPUB 章节 script-src 'none'
  */
 object Sandbox {
@@ -57,6 +55,8 @@ object Sandbox {
         "frame-src 'none'",
         "form-action 'none'",
         "base-uri 'none'",
+        "worker-src 'none'",
+        "object-src 'none'",
     )
 
     /** 单页文档（HTML/MD/代码/TXT 模板）：AI 生成的 HTML 依赖内联脚本 */
@@ -65,7 +65,7 @@ object Sandbox {
     /** EPUB 章节：电子书不需要脚本，一律禁止 */
     val BOOK_CSP = (COMMON + "script-src 'none'").joinToString("; ")
 
-    fun isLocal(url: Uri): Boolean = url.scheme == "https" && url.host == HOST && url.port in setOf(-1, 443)
+    fun isLocal(url: Uri, host: String = HOST): Boolean = url.scheme == "https" && url.host == host && url.port in setOf(-1, 443)
 
     /** 章节路径逐段编码（文件名里可能有空格、中文） */
     fun bookUrl(path: String): String =
@@ -88,10 +88,10 @@ private fun noStoreResponse(mime: String?, encoding: String?, csp: String, body:
         body,
     )
 
-private class DocumentPathHandler(private val html: String) : WebViewAssetLoader.PathHandler {
+private class DocumentPathHandler(private val html: String, private val csp: String) : WebViewAssetLoader.PathHandler {
     override fun handle(path: String): WebResourceResponse? {
         if (path != "index.html") return null
-        return noStoreResponse("text/html", "utf-8", Sandbox.CSP, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
+        return noStoreResponse("text/html", "utf-8", csp, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
     }
 }
 
@@ -121,6 +121,8 @@ private class EpubPathHandler(
 
 private class SandboxClient(
     private val loader: WebViewAssetLoader,
+    private val permissions: DocPermissions,
+    private val localHost: String,
     private val onHistoryChanged: (Boolean) -> Unit,
     private val onExternalLink: (Uri) -> Unit,
     private val onPageLoaded: (WebView) -> Unit,
@@ -130,8 +132,11 @@ private class SandboxClient(
     // 跑在后台线程，不能直接改 Compose 状态
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val url = request.url
-        if (Sandbox.isLocal(url)) {
+        if (Sandbox.isLocal(url, localHost)) {
             loader.shouldInterceptRequest(url)?.let { return it }
+        } else if (url.host != Sandbox.HOST && url.host?.endsWith(".${Sandbox.HOST}") != true &&
+            RequestPolicy.allowsNetwork(permissions, url.scheme, url.host)) {
+            return null
         }
         Log.w(Sandbox.TAG, "blocked request: ${request.method} $url")
         return WebResourceResponse("text/plain", "utf-8", 403, "Blocked by sandbox", emptyMap(), ByteArrayInputStream(ByteArray(0)))
@@ -139,14 +144,19 @@ private class SandboxClient(
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
-        if (Sandbox.isLocal(url)) return onInternalLink(url) // true = 我们接管（如切换 EPUB 章节）
-        val userClicked = request.isForMainFrame && request.hasGesture()
-        if (userClicked && url.scheme in setOf("http", "https", "mailto")) {
-            onExternalLink(url)
-        } else {
-            Log.w(Sandbox.TAG, "blocked navigation: $url (gesture=${request.hasGesture()})")
+        if (Sandbox.isLocal(url, localHost)) {
+            // A child frame cannot navigate into private document endpoints.
+            return if (request.isForMainFrame) onInternalLink(url) else true
         }
-        return true
+        if (url.host == Sandbox.HOST || url.host?.endsWith(".${Sandbox.HOST}") == true) return true
+        return when (NavigationPolicy.decide(permissions, request.isForMainFrame, request.hasGesture(), url.scheme)) {
+            NavigationPolicy.Decision.OPEN_EXTERNAL -> { onExternalLink(url); true }
+            NavigationPolicy.Decision.ALLOW_IN_PLACE -> false
+            NavigationPolicy.Decision.BLOCK -> {
+                Log.w(Sandbox.TAG, "blocked navigation: $url (gesture=${request.hasGesture()})")
+                true
+            }
+        }
     }
 
     override fun onPageFinished(view: WebView, url: String?) {
@@ -173,7 +183,6 @@ private fun WebView.applySandboxSettings(allowJs: Boolean) {
         mediaPlaybackRequiresUserGesture = true
         cacheMode = WebSettings.LOAD_NO_CACHE
     }
-    CookieManager.getInstance().setAcceptCookie(false)
 }
 
 private fun openExternal(context: Context, uri: Uri) {
@@ -194,10 +203,11 @@ fun WebView.scrollRatio(): Float {
     return if (range == 0) 0f else (scrollY.toFloat() / range).coerceIn(0f, 1f)
 }
 
-private suspend fun WebView.restoreRatio(ratio: Float) {
+private suspend fun WebView.restoreRatio(ratio: Float, stillCurrent: () -> Boolean) {
     var last = -1
     var stable = 0
     repeat(30) {
+        if (!stillCurrent()) return
         val h = contentHeight
         if (h > 0 && h == last) {
             if (++stable >= 3) {
@@ -207,10 +217,10 @@ private suspend fun WebView.restoreRatio(ratio: Float) {
         } else { stable = 0; last = h }
         delay(100)
     }
-    scrollTo(0, (ratio * maxScrollPx()).roundToInt())
+    if (stillCurrent()) scrollTo(0, (ratio * maxScrollPx()).roundToInt())
 }
 
-private class ScrollPosition(var ratio: Float, var reporting: Boolean = false)
+private class ScrollPosition(var ratio: Float, var reporting: Boolean = false, var initialized: Boolean = false, var epoch: Int = 0)
 
 /** HTML templates update live; EPUB keeps scripts disabled and reloads with injected CSS. */
 @Composable
@@ -226,7 +236,12 @@ fun HtmlView(
     reading: String? = null,
     bookReadingCss: () -> String = { "" },
     gestures: ReaderGestures? = null,
+    permissions: DocPermissions = DocPermissions.STANDARD,
+    storageProfileId: Long? = null,
 ) {
+    val effective = AppCapabilities.effective(permissions)
+    val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
+    val touchCleanup = remember { mutableMapOf<WebView, () -> Unit>() }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
     var pageLoads by remember { mutableIntStateOf(0) }
@@ -244,6 +259,9 @@ fun HtmlView(
     LaunchedEffect(theme, wrap, reading, webView, pageLoads) {
         val view = webView ?: return@LaunchedEffect
         if (pageLoads == 0) return@LaunchedEffect
+        // Capture native position before reflow; onScroll callbacks can lag behind the visual scroll.
+        val target = if (position.initialized) view.scrollRatio() else position.ratio
+        val epoch = ++position.epoch
         position.reporting = false
         if (source is PageSource.Html) {
             val updates = buildList {
@@ -253,34 +271,44 @@ fun HtmlView(
             }
             if (updates.isNotEmpty()) view.evaluateJavascript(updates.joinToString(";"), null)
         }
-        view.restoreRatio(position.ratio)
-        position.ratio = view.scrollRatio()
-        position.reporting = true
-        latestOnRatio(position.ratio)
+        // Fresh documents already start at the top. A delayed scrollTo(0, 0) would overwrite
+        // early page/script/user scrolling even when there was no saved position to restore.
+        if (target > 0f) view.restoreRatio(target) { position.epoch == epoch }
+        if (position.epoch == epoch) {
+            position.ratio = view.scrollRatio()
+            position.initialized = true
+            position.reporting = true
+            latestOnRatio(position.ratio)
+        }
     }
 
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            WebStorage.getInstance().deleteAllData()
+            val view = WebView(context)
+            val session = DocProfiles.attach(view, storageProfileId.takeIf { effective.persistentStorage })
+            sessions[view] = session
+            val localHost = session.host
             val builder = WebViewAssetLoader.Builder()
-                .setDomain(Sandbox.HOST)
+                .setDomain(localHost)
                 .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
             val startUrl = when (source) {
                 is PageSource.Html -> {
-                    builder.addPathHandler("/doc/", DocumentPathHandler(source.html))
-                    Sandbox.DOC_URL
+                    builder.addPathHandler("/doc/", DocumentPathHandler(source.html, CspPolicy.build(effective)))
+                    "https://$localHost/doc/index.html"
                 }
                 is PageSource.BookFile -> {
                     builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir, { latestBookTheme() }, { latestBookReading() }))
-                    Sandbox.bookUrl(source.path) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
+                    Sandbox.bookUrl(source.path).replace(Sandbox.HOST, localHost) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
                 }
             }
             val loader = builder.build()
-            WebView(context).apply {
-                applySandboxSettings(allowJs = source is PageSource.Html)
+            view.apply {
+                applySandboxSettings(allowJs = source is PageSource.Html && effective.scripts)
                 webViewClient = SandboxClient(
                     loader = loader,
+                    permissions = if (source is PageSource.BookFile) DocPermissions.STRICT else effective,
+                    localHost = localHost,
                     onHistoryChanged = { canGoBack = it },
                     onExternalLink = { uri -> openExternal(context, uri) },
                     onPageLoaded = { pageLoads++ },
@@ -295,7 +323,14 @@ fun HtmlView(
                         latestOnRatio(position.ratio)
                     }
                 }
-                installReaderGestures(context) { latestGestures }
+                touchCleanup[this] = installReaderGestures(context, onTouch = {
+                    // A real touch takes priority over a pending initial/reflow restoration.
+                    position.epoch++
+                    position.initialized = true
+                    position.reporting = true
+                    position.ratio = scrollRatio()
+                    latestOnRatio(position.ratio)
+                }) { latestGestures }
                 loadUrl(startUrl)
                 webView = this
             }
@@ -303,10 +338,11 @@ fun HtmlView(
         onRelease = {
             position.reporting = false
             it.setOnScrollChangeListener(null)
-            it.setOnTouchListener(null)
+            touchCleanup.remove(it)?.invoke()
             it.animate().cancel()
             webView = null
             it.destroy()
+            sessions.remove(it)?.let { session -> DocProfiles.release(it.context, session) }
         },
     )
 }
@@ -332,13 +368,13 @@ private fun WebView.turnPage(forward: Boolean, g: ReaderGestures) {
 
 
 @SuppressLint("ClickableViewAccessibility") // 翻页不是"点击控件"，读屏用户仍可用底部栏的上一章 / 下一章
-private fun WebView.installReaderGestures(context: Context, gestures: () -> ReaderGestures?) {
+private fun WebView.installReaderGestures(context: Context, onTouch: () -> Unit, gestures: () -> ReaderGestures?): () -> Unit {
+    var active = true
+    var tappedLink = false
     val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (!active || !isAttachedToWindow || tappedLink) return false
             val g = gestures() ?: return false
-            // 点在链接上：交给网页处理跳转，不当成翻页
-            val type = hitTestResult.type
-            if (type == WebView.HitTestResult.SRC_ANCHOR_TYPE || type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) return false
             val x = e.x / width.coerceAtLeast(1)
             when {
                 !g.tapToTurn || x in 0.3f..0.7f -> g.onToggleBars()
@@ -349,7 +385,13 @@ private fun WebView.installReaderGestures(context: Context, gestures: () -> Read
         }
     })
     setOnTouchListener { _, event ->
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) onTouch()
+        // Remember the link before WebView navigates; the confirmed callback arrives later.
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            tappedLink = hitTestResult.type in setOf(WebView.HitTestResult.SRC_ANCHOR_TYPE, WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE)
+        }
         detector.onTouchEvent(event)
         false
     }
+    return { active = false; setOnTouchListener(null) }
 }
