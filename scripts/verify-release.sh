@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verify the signed final artifact, rather than the source Manifest.
 set -euo pipefail
-if [[ $# != 3 ]]; then
-  echo 'Usage: verify-release.sh APK vVERSION APPLICATION_ID' >&2
+if [[ $# != 3 && $# != 4 ]]; then
+  echo 'Usage: verify-release.sh APK vVERSION APPLICATION_ID [strict|standard]' >&2
   exit 2
 fi
 apk=$1
@@ -20,8 +20,5 @@ package_line=$(printf '%s\n' "$badging" | sed -n '/^package: /p')
 [[ "$package_line" == *"versionName='${tag#v}'"* ]] || { echo 'APK versionName does not match tag' >&2; exit 1; }
 permissions=$("$tools/aapt2" dump permissions "$apk")
 printf '%s\n' "$package_line" "$permissions"
-if [[ "$permissions" == *"android.permission.INTERNET"* ]]; then
-  echo 'Release rejected: final APK declares INTERNET' >&2
-  exit 1
-fi
+"$(dirname "$0")/verify-apk-permissions.sh" "$apk" "${4:-strict}"
 printf 'Release artifact verified: %s\n' "$apk"

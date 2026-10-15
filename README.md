@@ -5,7 +5,9 @@
 [![CI](https://github.com/Zer0Rin/yhviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Zer0Rin/yhviewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Zer0Rin/yhviewer)](https://github.com/Zer0Rin/yhviewer/releases/latest)
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
-![Network](https://img.shields.io/badge/INTERNET%20permission-none-success)
+![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
+
+v0.3.0 is under validation; the latest published v0.2.0 remains the single offline edition until a new tag is published.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -13,7 +15,7 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|---|---|---|---|
 | ![](docs/screenshots/shelf.png) | ![](docs/screenshots/html.png) | ![](docs/screenshots/markdown.png) | ![](docs/screenshots/code.png) | ![](docs/screenshots/epub.png) | ![](docs/screenshots/sandbox.png) |
 
-**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds a signed R8 APK, checks its final permissions and smoke-tests startup before publishing. See [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
+**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 
@@ -30,7 +32,7 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 
 | Type | What you get |
 |---|---|
-| **HTML** | Rendered as-is in the sandbox. External links open in the system browser only on a real tap |
+| **HTML** | Rendered as-is in the sandbox. Per-document permissions; external links require a real tap by default |
 | **Markdown** | markdown-it + highlight.js, bundled offline. Raw HTML inside Markdown is shown as text |
 | **Code** | File-type detection, line numbers excluded from copied text, wrap toggle and bundled syntax highlighting. Compact JSON up to 500,000 characters is formatted; large files skip highlighting and render in 200-line chunks |
 | **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents |
@@ -39,9 +41,14 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 Reading and library features:
 
 - **Reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Markdown, code and TXT switch in place; EPUB reloads with scripts disabled. Position is preserved approximately and code colors follow the theme. HTML retains its original appearance and has no theme menu.
+- **Book reading controls**: TXT and EPUB support immersive reading, confirmed left/right taps to move 90% of the viewport, chapter navigation, font size, line height, margins, font selection and keep-awake. Settings persist; EPUB scripts remain disabled.
 - **Reading position**: saved per document as chapter + scroll ratio, restored after theme changes, rotation and app restarts. Saves are debounced and flushed on backgrounding; an abrupt kill can lose the most recent unsaved movement. The shelf shows how far you've read.
 - **Shelf**: recent files, favorites, search. Files are copied on import, so they stay readable offline after the source is deleted.
 - **Open from anywhere**: "Open with" from a file manager, "Share" from another app, or the built-in picker.
+
+| Book reading controls | Document permissions (Standard) |
+|---|---|
+| ![](docs/screenshots/reading-settings.png) | ![](docs/screenshots/permissions-standard.png) |
 
 ## Security model
 
@@ -49,15 +56,27 @@ Defense in depth: complementary restrictions limit device access, resource loadi
 
 | # | Layer | Mechanism | Blocks |
 |---|---|---|---|
-| 1 | OS permission | No `INTERNET` permission. The **release workflow inspects the final APK** and refuses to publish if a dependency merged it in | Any network access from the app |
-| 2 | WebView settings | No `file://` / `content://` access, no JS bridge, no auto popups. **JavaScript is off entirely for EPUB chapters** | Reading device files, calling into Kotlin |
-| 3 | Request interception | `shouldInterceptRequest` serves only the virtual origin `appassets.androidplatform.net`; everything else gets an empty `403` | Loading external resources |
-| 4 | Content-Security-Policy | Sent as a **response header** on every page. App templates: `connect-src 'none'`, `frame-src 'none'`. EPUB chapters additionally `script-src 'none'` | fetch / XHR / WebSocket, external scripts and frames, book scripts |
+| 1 | OS permission | **Strict** has no `INTERNET`; **Standard** has it but blocks requests by default. CI and releases inspect both final APKs | Accidental flavor misconfiguration |
+| 2 | WebView settings | No `file://` / `content://` access, no JS bridge, no auto popups, no cookies. EPUB JavaScript is always off | Reading device files, calling into Kotlin |
+| 3 | Request interception | Current private origin and explicitly permitted HTTPS hosts only; unknown private paths return 403 | Unapproved resource hosts |
+| 4 | Content-Security-Policy | Response header on local documents; permissions select resource types. Default `connect-src 'none'`, `frame-src 'none'`; EPUB `script-src 'none'` | Unapproved scripts, connections and frames in the current document |
+
+HTML permissions are stored per document. Markdown, code and TXT always use the default sandbox; EPUB never runs scripts.
+
+| Preset | Scripts | Persistent data | Scripted external links | CDN | External media | Iframes | fetch / XHR / WebSocket |
+|---|---|---|---|---|---|---|---|
+| Strict | | | | | | | |
+| Standard (default) | ✓ | | | | | | |
+| Trusted | ✓ | ✓ | ✓ | ✓ | ✓ | | |
+
+Iframes and active networking require explicit manual grants and show warnings. Strict edition disables all four network-related switches. These are presets, not stored tier names: old combinations that include iframe access appear as Custom.
+
+**Known boundaries:** third-party iframe documents do not inherit the parent document's CSP and may connect freely when iframe access is granted. Image, media and iframe URLs can carry document data to an external server. Disabling fetch/XHR/WebSocket does not promise that no data can leave a document after external resources or scripted external links are allowed. Only Strict's missing OS network permission prevents app networking entirely; handing a link to a browser is a separate user-visible action.
 
 Plus:
 
-- **Navigation**: `http(s)` / `mailto` links reach the system browser only when `request.hasGesture()` is true. Script-driven redirects are dropped.
-- **Storage isolation**: all documents share one virtual origin, so `localStorage` is wiped before each document loads.
+- **Navigation**: real taps open the system browser; HTML may explicitly allow scripted external links. Approved HTTPS child-frame navigation stays in the frame.
+- **Storage isolation**: each render gets an independent ephemeral WebView Profile; opt-in persistent data uses a document-specific generation. Revoking storage invalidates the generation immediately, even if an old WebView delays deletion. Startup/disposal retry cleanup. Older engines disable persistence and use an unguessable per-render virtual origin. Cookies and service-worker networking stay disabled.
 - **Injection-safe templates**: user content is embedded as JSON with every `<` encoded as `\u003c`, so `</script>` or `<!--` can't break out. The theme id is substituted **before** user content, so text that happens to contain the placeholder is never rewritten.
 
 ### EPUB is an untrusted zip full of untrusted HTML
@@ -85,7 +104,7 @@ flowchart TB
     VM["ShelfViewModel<br/>navigation · chapter · position"] --> Repo["ShelfRepository"]
     Repo -->|"probe / readText / copyTo"| Loader["DocumentLoader<br/>size caps · CharsetDetector"]
     Repo -->|"EPUB"| Epub["SafeUnzip → EpubParser"]
-    Repo -->|"metadata · locator"| Room[("Room v2")]
+    Repo -->|"metadata · locator"| Room[("Room v3")]
     Repo -->|"UTF-8 copy / extracted book"| Files[("filesDir/shelf/")]
     VM --> Reader["ReaderScreen"]
     Reader -->|"PageSource.Html"| Templates["md · code · txt templates<br/>+ shared themes.css"]
@@ -105,11 +124,11 @@ flowchart TB
 | **Debounced saves + flush on stop** | Scrolling writes nothing until it settles for 0.8 s; leaving the reader or backgrounding the app saves immediately | — |
 | **One chapter per page** | A multi-MB novel in a single DOM is slow; chapters keep pages small. Code files use `content-visibility` chunks to reduce layout/paint work; all line nodes still exist | — |
 | **Orphan cleanup on startup** | Removes copies no row points to and interrupted imports; imports wait for it to finish so a fresh copy is never deleted | — |
-| **Block CDNs by default** | Safe default for untrusted files | AI pages that load chart libraries from a CDN won't render charts yet |
+| **Block CDNs by default** | Safe default for untrusted files | Standard edition can explicitly permit the supported CDNs per HTML file |
 
 ## Testing
 
-**76 JVM tests + 43 instrumented tests** (including two generated smoke tests). CI runs the device suite on **API 34**; local acceptance uses **API 37**. The officially signed R8 build was also smoke-tested on a physical **API 35** device. Reports and debug APKs are retained as CI artifacts for 14 days.
+The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. Reports and debug APKs are retained as CI artifacts for 14 days.
 
 | Area | Type | Covers |
 |---|---|---|
@@ -118,14 +137,16 @@ flowchart TB
 | Text | JVM | Encoding detection (UTF-8, BOM, GBK, UTF-16), chapter splitting (TOC at start, long lines, fallback by size), file-type detection |
 | Data | Instrumented (in-memory Room) | Ordering, search with literal `%` / `_`, favorites, unique source |
 | Repository | Instrumented (temp dirs, injected clock) | Import and reopen for every type, atomic re-import, GBK → UTF-8, position round trip, malicious EPUB leaves no files, orphan cleanup |
-| Migration | Instrumented (`MigrationTestHelper`) | v1 → v2 keeps existing rows, new columns get correct defaults, schema validated against the exported JSON |
+| Migration | Instrumented (`MigrationTestHelper`) | v1 → v2 → v3 keeps existing rows, progress and default permissions, schema validated against the exported JSON |
+| Permissions | JVM + instrumented | All 128 bit combinations, presets excluding iframe/network, build capabilities, independent storage, live-profile revocation, real CSP parent/iframe boundary |
+| Reading settings | JVM + instrumented | Finite normalization, safe CSS, confirmed taps, stable viewport, previous chapter end and persisted controls |
 | App flows | Instrumented | Open-with, share, single-instance reuse, back-stack layering, size limits |
 
 ### Sandbox verification
 
 `sandbox-test.html` runs 9 checks in the page and exposes `window.__sandboxResult` for automated assertion: JavaScript execution, external image, fetch, `file://`, `content://`, WebSocket, external iframe, cross-document `localStorage`, and CSP enforcement.
 
-> **Methodology:** the normal APK has no network permission, so a failed network request alone would not establish that the WebView sandbox blocked it. The same page was therefore run **with `INTERNET` temporarily granted**. A native HTTPS positive control returned **200**; opening and re-opening the sandbox page still produced **9/9 PASS**. The permission was then removed, the APK permission list checked, and the page re-tested.
+> **Methodology (historical v0.2.0 acceptance):** the original APK has no network permission, so a failed network request alone would not establish that the WebView sandbox blocked it. The same page was therefore run **with `INTERNET` temporarily granted**. A native HTTPS positive control returned **200**; opening and re-opening the sandbox page still produced **9/9 PASS**. The permission was then removed, the APK permission list checked, and the page re-tested.
 
 The individual evidence is narrower than claiming every layer was disabled and tested in isolation:
 
@@ -135,6 +156,8 @@ The individual evidence is narrower than claiming every layer was disabled and t
 - Real taps launch a browser Intent; scripted redirects leave the document in place.
 
 CSP-blocked requests may never reach the interceptor, so Logcat alone is insufficient evidence. The temporary permission run removes the OS-permission safety net; it does **not** by itself prove every other layer independently blocks every attack. See [sandbox verification](docs/verification/STEP3_VERIFICATION.md).
+
+Standard edition now provides the permanent network-permission test round; it checks a native HTTPS positive control and the default 9/9 sandbox result. Relaxed permissions intentionally change those expected outcomes. See [v0.3 integration verification](docs/verification/V03_VERIFICATION.md).
 
 See [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
 
@@ -147,9 +170,9 @@ Kotlin · Jetpack Compose (Material 3) · Android WebView + `androidx.webkit` ·
 ```bash
 git clone https://github.com/Zer0Rin/yhviewer.git
 cd yhviewer
-./gradlew assembleDebug          # build
-./gradlew testDebugUnitTest      # JVM tests
-./gradlew :app:connectedDebugAndroidTest --no-configuration-cache  # emulator or device
+./gradlew assembleStrictDebug assembleStandardDebug  # build both editions
+./gradlew testStrictDebugUnitTest testStandardDebugUnitTest
+./gradlew :app:connectedStrictDebugAndroidTest :app:connectedStandardDebugAndroidTest --no-configuration-cache  # emulator or device
 ```
 
 `minSdk 26`, compile/target SDK 37 (`platforms;android-37.0`), AGP 9.4.0, Gradle 9.6.0 and a JDK 25 daemon toolchain. Configure the local SDK path or open in Android Studio. Release signing reads environment variables only; see [RELEASE.md](RELEASE.md). The application ID is `io.github.zer0rin.yhviewer`; the old `com.example.yhviewer` development build remains a separate app with its own shelf.
@@ -159,11 +182,11 @@ cd yhviewer
 Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compressed EPUB at 100 MiB. Extracted EPUB limits are 3,000 entries, 50 MiB per entry and 200 MiB total; XML/chapter input is capped at 10 MiB each. EPUB XML/XHTML currently uses UTF-8. DRM and publisher interactive features are unsupported. Big5 detection is heuristic, and scroll ratios preserve an approximate location rather than an exact paragraph.
 
 
-- [ ] **Per-document "allow network" toggle** so CDN-based charts can render, opt-in per file
+- [x] Per-document permissions and Strict / Standard editions
 - [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
 - [ ] Statistical charset detection (e.g. ICU) to tell Big5 from GB18030 reliably
 - [ ] Optional KaTeX / Mermaid modules (kept out of the core to stay lightweight)
-- [ ] Font size and line-height controls for books
+- [x] Font size, line height, margins and immersive controls for books
 - [ ] Real-device matrix (OEM file managers and WebView versions)
 
 ## License
