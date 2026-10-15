@@ -85,6 +85,21 @@ class DocPermissionsTest {
         assertFalse(DocPermissions.fromBits(saved.toBits()).effective(true).persistentStorage)
     }
 
+    @Test fun unsupportedProfileIsolationMasksLegacyFrameAndStorageGrantsWithoutRewritingThem() {
+        val legacyGrant = DocPermissions.STANDARD.copy(persistentStorage = true, frames = true)
+        val storedBits = legacyGrant.toBits()
+        val reopened = DocPermissions.fromBits(storedBits)
+
+        val fallback = reopened.effective(networkCapable = true, persistentStorageSupported = false)
+        assertFalse(fallback.persistentStorage)
+        assertFalse(fallback.frames)
+        assertEquals(storedBits, reopened.toBits())
+
+        val isolated = reopened.effective(networkCapable = true, persistentStorageSupported = true)
+        assertTrue(isolated.persistentStorage)
+        assertTrue(isolated.frames)
+    }
+
     @Test fun relaxedFlag() {
         assertFalse(DocPermissions.STRICT.isRelaxed)
         assertFalse(DocPermissions.STANDARD.isRelaxed)

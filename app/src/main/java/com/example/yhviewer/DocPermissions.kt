@@ -28,12 +28,13 @@ data class DocPermissions(
     /**
      * 实际生效的权限：
      *  - Strict 版（没有 INTERNET 权限）去掉所有联网类权限
+     *  - 不支持独立 WebView profile 时，嵌入页面会共享第三方域名的数据，故一并禁用 frames
      *  - 本地数据、脚本跳转都依赖脚本，脚本关闭时一并失效
      */
     fun effective(networkCapable: Boolean, persistentStorageSupported: Boolean = true): DocPermissions {
         var p = this
         if (!networkCapable) p = p.copy(cdn = false, externalMedia = false, frames = false, network = false)
-        if (!persistentStorageSupported) p = p.copy(persistentStorage = false)
+        if (!persistentStorageSupported) p = p.copy(persistentStorage = false, frames = false)
         if (!p.scripts) p = p.copy(persistentStorage = false, scriptedNavigation = false)
         return p
     }

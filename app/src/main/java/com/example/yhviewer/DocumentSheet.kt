@@ -147,7 +147,12 @@ fun PermissionEditor(permissions: DocPermissions, onChange: (DocPermissions) -> 
         ) { onChange(p.copy(externalMedia = it)) }
         PermissionRow(
             "嵌入外部页面", "⚠ 嵌入的网页按它自己的规则运行，可以自由联网；它的 URL 也可能携带文档内容并发送到外部服务器",
-            p.frames, enabled = net, reason = if (!net) strictReason else null, warning = true,
+            p.frames, enabled = net && storageSupported,
+            reason = when {
+                !net -> strictReason
+                !storageSupported -> "需要更新系统 WebView，才能隔离嵌入页面的数据"
+                else -> null
+            }, warning = true,
         ) { onChange(p.copy(frames = it)) }
         PermissionRow(
             "主动联网", "⚠ 页面可以把任何内容发送到任意服务器。只对你完全信任的页面打开",
