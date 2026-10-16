@@ -76,7 +76,7 @@ Iframes and active networking require explicit manual grants and show warnings. 
 Plus:
 
 - **Navigation**: real taps open the system browser; HTML may explicitly allow scripted external links. Approved HTTPS child-frame navigation stays in the frame.
-- **Storage isolation**: each render gets an independent ephemeral WebView Profile; opt-in persistent data uses a document-specific generation. Revoking storage invalidates the generation immediately, even if an old WebView delays deletion. Startup/disposal retry cleanup. Older engines disable persistence and use an unguessable per-render virtual origin. Cookies and service-worker networking stay disabled.
+- **Storage isolation**: each render gets an independent ephemeral WebView Profile; opt-in persistent data uses a document-specific generation. Revoking storage invalidates the generation immediately, even if an old WebView delays deletion. Startup/disposal retry cleanup. Older engines disable persistence and iframe access, and use an unguessable per-render virtual origin. Third-party iframe origins cannot be isolated on those engines. Cookies and service-worker networking stay disabled.
 - **Injection-safe templates**: user content is embedded as JSON with every `<` encoded as `\u003c`, so `</script>` or `<!--` can't break out. The theme id is substituted **before** user content, so text that happens to contain the placeholder is never rewritten.
 
 ### EPUB is an untrusted zip full of untrusted HTML

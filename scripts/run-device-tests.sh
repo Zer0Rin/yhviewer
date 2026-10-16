@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Dedicated CI emulator only: never operate on a phone or an ambiguous device list.
 set -euo pipefail
+if [[ ${GITHUB_ACTIONS:-} != true || ${CI:-} != true ]]; then
+  echo 'Device test runner is restricted to GitHub Actions disposable emulators.' >&2
+  exit 2
+fi
 yh_test_devices=()
 while IFS= read -r yh_test_device; do
   yh_test_devices+=("$yh_test_device")

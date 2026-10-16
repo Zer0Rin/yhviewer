@@ -105,11 +105,13 @@ class V2ReaderIntegrationTest {
     private fun waitText(text: String) = compose.waitUntil(25_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
-        compose.onNode(hasText(label, substring = true)).performClick()
-        // Book themes now live in a sheet; code retains its dropdown.
-        if (compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()) {
-            androidx.test.espresso.Espresso.pressBack()
-        }
+        // Book chips scroll horizontally on narrow screens; an offscreen coordinate click
+        // can hit the sheet scrim instead. Code retains its ordinary dropdown.
+        val bookSheet = compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()
+        val option = compose.onNode(hasText(label, substring = true))
+        if (bookSheet) option.performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
+        else option.performClick()
+        if (bookSheet) androidx.test.espresso.Espresso.pressBack()
     }
     private fun nativeRatio(s: ActivityScenario<MainActivity>): Float {
         var result = -1f
