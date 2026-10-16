@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh" data-theme="__THEME__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
+  <style>
+    :root { --ok: var(--hl-string); --warn: var(--hl-type); --err: #e5534b; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.55 var(--font-mono); -webkit-text-size-adjust: 100%; }
+
+    .status {
+      position: sticky; top: 0; z-index: 1;
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px; background: var(--bg); border-bottom: 1px solid var(--border);
+      font: 12px/1.4 var(--font-sans); color: var(--muted);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+    .status[data-state="running"] .dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+    .status[data-state="done"] .dot { background: var(--ok); }
+    .status[data-state="error"] .dot,
+    .status[data-state="timeout"] .dot,
+    .status[data-state="limit"] .dot { background: var(--err); }
+    .status .time { margin-left: auto; font-variant-numeric: tabular-nums; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) { .status[data-state="running"] .dot { animation: none; } }
+
+    #out { padding: 4px 0 40px; }
+    .line {
+      display: flex; gap: 8px; padding: 3px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .line .k { flex: none; width: 1.1em; text-align: center; color: var(--muted); user-select: none; -webkit-user-select: none; }
+    .line .v { min-width: 0; flex: 1; }
+    .line.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+    .line.error { color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); }
+    .line.info .k { color: var(--accent); }
+    .line.sys { color: var(--muted); font: 12px/1.5 var(--font-sans); }
+    .empty { padding: 16px 14px; color: var(--muted); font: 12px var(--font-sans); }
+  </style>
+</head>
+<body>
+  <div class="status" id="status" data-state="running">
+    <span class="dot"></span><span id="label">运行中…</span><span class="time" id="time"></span>
+  </div>
+  <div id="out"></div>
+
+  <!-- Kotlin 替换成 JSON：{"code": "...", "timeoutMs": 5000, "maxLines": 1000, "maxChars": 200000} -->
+  <script type="application/json" id="payload">/*PAYLOAD*/</script>
+  <script>
+    window.setTheme = function (t) {
+      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) document.documentElement.setAttribute('data-theme', t);
+    };
+
+    (function () {
+      var p = JSON.parse(document.getElementById('payload').textContent);
+      var code = p.code; // Preserve string and template-literal source semantics.
+      function boundedInt(value, fallback, maximum) {
+        return Number.isInteger(value) && value > 0 ? Math.min(value, maximum) : fallback;
+      }
+      var maxEntries = boundedInt(p.maxLines, 1000, 1000);
+      var maxChars = boundedInt(p.maxChars, 200000, 200000);
+      var timeoutMs = boundedInt(p.timeoutMs, 5000, 30000);
+      var maxMessages = 4000, maxEntryChars = 10000;
+      var TRUNCATED = ' …（已截断）';
+      function clip(text, maximum) {
+        if (text.length <= maximum) return text;
+        return text.slice(0, Math.max(0, maximum - TRUNCATED.length)) + TRUNCATED.slice(0, maximum);
+      }
+
+      // Worker console formatting has one shared character/work budget per call.
+      // User code can bypass this with postMessage; parent limits remain authoritative.
+      function workerPrelude() {
+        var __post = self.postMessage.bind(self);
+        var __entries = 0, __chars = 0, __messages = 0, __limited = false;
+        var __marker = ' …（已截断）';
+        function __clip(text, maximum) {
+          if (text.length <= maximum) return text;
+          return text.slice(0, Math.max(0, maximum - __marker.length)) + __marker.slice(0, maximum);
+        }
+        function __limit() {
+          if (__limited) return;
+          __limited = true;
+          __post({ t: 'limit' });
+        }
+        function __control(message) {
+          if (__limited) return;
+          if (__messages >= __maxMessages) { __limit(); return; }
+          __messages++;
+          __post(message);
+        }
+        function __write(b, text) {
+          if (b.left <= 0) return;
+          text = __clip(text, b.left);
+          b.parts.push(text);
+          b.left -= text.length;
+        }
+        function __fmt(v, b, d, seen) {
+          if (b.left <= 0) return;
+          if (b.work-- <= 0) { __write(b, '…'); return; }
+          var t = typeof v;
+          if (v === null || v === undefined) { __write(b, String(v)); return; }
+          if (t === 'string') {
+            var s = __clip(v, b.left);
+            __write(b, d === 0 ? s : JSON.stringify(s)); return;
+          }
+          if (t === 'number' || t === 'boolean' || t === 'bigint') {
+            __write(b, String(v) + (t === 'bigint' ? 'n' : '')); return;
+          }
+          if (t === 'symbol') { __write(b, v.toString()); return; }
+          if (t === 'function') {
+            __write(b, '[Function: '); __write(b, typeof v.name === 'string' ? v.name : 'anonymous'); __write(b, ']'); return;
+          }
+          if (v instanceof Error) {
+            var stack = v.stack;
+            if (typeof stack === 'string') __write(b, stack);
+            else { __write(b, String(v.name)); __write(b, ': '); __write(b, String(v.message)); }
+            return;
+          }
+          if (v instanceof Date) { __write(b, isNaN(v) ? 'Invalid Date' : v.toISOString()); return; }
+          if (v instanceof RegExp) { __write(b, String(v)); return; }
+          if (seen.indexOf(v) >= 0) { __write(b, '[Circular]'); return; }
+          if (d > 2) { __write(b, Array.isArray(v) ? '[Array]' : '[Object]'); return; }
+          seen = seen.concat([v]);
+          var i = 0;
+          if (Array.isArray(v)) {
+            __write(b, '[');
+            for (; i < v.length && i < 100 && b.left > 0 && b.work > 0; i++) {
+              if (i) __write(b, ', ');
+              __fmt(v[i], b, d + 1, seen);
+            }
+            if (i < v.length) __write(b, ', … ' + (v.length - i) + ' more');
+            __write(b, ']'); return;
+          }
+          if (v instanceof Map || v instanceof Set) {
+            var isMap = v instanceof Map, size = v.size;
+            __write(b, (isMap ? 'Map(' : 'Set(') + size + ') {');
+            var iterator = isMap ? v.entries() : v.values();
+            while (i < 100 && b.left > 0 && b.work > 0) {
+              b.work--;
+              var next = iterator.next();
+              if (next.done) break;
+              if (i++) __write(b, ', ');
+              if (isMap) {
+                __fmt(next.value[0], b, d + 1, seen); __write(b, ' => ');
+                __fmt(next.value[1], b, d + 1, seen);
+              } else __fmt(next.value, b, d + 1, seen);
+            }
+            if (i < size) __write(b, ', … ' + (size - i) + ' more');
+            __write(b, '}'); return;
+          }
+          var name = v.constructor && v.constructor.name;
+          if (typeof name === 'string' && name !== 'Object') { __write(b, name); __write(b, ' '); }
+          __write(b, '{');
+          for (var key in v) {
+            if (b.left <= 0 || b.work-- <= 0 || i >= 100) { __write(b, ' …'); break; }
+            if (!Object.prototype.hasOwnProperty.call(v, key)) continue;
+            __write(b, i++ ? ', ' : ' '); __write(b, key); __write(b, ': ');
+            __fmt(v[key], b, d + 1, seen);
+          }
+          if (i) __write(b, ' ');
+          __write(b, '}');
+        }
+        function __format(args, maximum) {
+          var b = { left: maximum, work: 1000, parts: [] };
+          for (var i = 0; i < args.length && i < 50 && b.left > 0 && b.work > 0; i++) {
+            if (i) __write(b, ' ');
+            try { __fmt(args[i], b, 0, []); }
+            catch (e) { __write(b, '[无法格式化]'); }
+          }
+          if (i < args.length) __write(b, ' …');
+          return b.parts.join('');
+        }
+        function __send(level, args) {
+          if (__limited) return;
+          if (__entries >= __maxEntries || __chars >= __maxChars || __messages >= __maxMessages) { __limit(); return; }
+          var text = __format(args, Math.min(10000, __maxChars - __chars));
+          __entries++; __chars += text.length; __messages++;
+          __post({ t: 'log', level: level, text: text });
+          if (__entries >= __maxEntries || __chars >= __maxChars) __limit();
+        }
+        function __fail(reason) {
+          if (__limited) return;
+          __control({ t: 'main-error', text: __format([reason], 10000) });
+        }
+        var __timers = Object.create(null), __timerCount = 0;
+        self.console = {
+          log: function () { __send('log', arguments); },
+          info: function () { __send('info', arguments); },
+          debug: function () { __send('log', arguments); },
+          warn: function () { __send('warn', arguments); },
+          error: function () { __send('error', arguments); },
+          table: function () { __send('log', arguments); },
+          dir: function () { __send('log', arguments); },
+          clear: function () { __control({ t: 'clear' }); },
+          assert: function (condition) {
+            if (condition) return;
+            var args = ['Assertion failed:'];
+            for (var i = 1; i < arguments.length && i < 50; i++) args.push(arguments[i]);
+            __send('error', args);
+          },
+          time: function (label) {
+            label = label === undefined ? 'default' : __format([label], 200);
+            if (!(label in __timers) && __timerCount >= 100) return;
+            if (!(label in __timers)) __timerCount++;
+            __timers[label] = performance.now();
+          },
+          timeEnd: function (label) {
+            label = label === undefined ? 'default' : __format([label], 200);
+            if (label in __timers) {
+              __send('log', [label + ': ' + (performance.now() - __timers[label]).toFixed(1) + ' ms']);
+              delete __timers[label]; __timerCount--;
+            }
+          }
+        };
+        self.addEventListener('unhandledrejection', function (event) {
+          event.preventDefault();
+          __fail('未处理的 Promise 拒绝：' + __format([event.reason], 9900));
+        });
+      }
+      var support = workerPrelude.toString();
+      var PRELUDE = 'var __maxEntries = ' + maxEntries + ', __maxChars = ' + maxChars + ', __maxMessages = ' + maxMessages + ';\n' +
+        support.slice(support.indexOf('{') + 1, support.lastIndexOf('}'));
+      // Async wrapping supports await; it is not an ES module.
+      var HEAD = PRELUDE + '\n(async function () {\n';
+      var TAIL = '\n})().then(function () { __control({ t: "main-done" }); }, __fail);\n';
+      var LINE_OFFSET = HEAD.split('\n').length - 1;
+      var USER_LINES = code.split(/\r\n|[\n\r\u2028\u2029]/).length;
+      var url = null, stackLocation = null;
+      function fixLines(text) {
+        if (!stackLocation) return text;
+        return text.replace(stackLocation, function (_, line, column) {
+          var n = Number(line) - LINE_OFFSET;
+          return n >= 1 && n <= USER_LINES ? '第 ' + n + ' 行' : '运行环境';
+        });
+      }
+
+      var out = document.getElementById('out');
+      var buffer = [], frame = null, lineCount = 0, charCount = 0, messageCount = 0;
+      var ICON = { log: '›', info: 'i', warn: '!', error: '✕', sys: '·' };
+      var state = 'running', t0 = performance.now(), endsAt = t0 + timeoutMs;
+      var statusEl = document.getElementById('status');
+      var labelEl = document.getElementById('label');
+      var timeEl = document.getElementById('time');
+      var LABEL = { done: '完成', error: '出错', timeout: '超时', limit: '输出过多', stopped: '已停止' };
+      var worker = null, deadline, idle, ticker, mainDone = false;
+      window.__runResult = { state: state, lines: 0, chars: 0, messages: 0 };
+      function snapshot() {
+        window.__runResult = { state: state, lines: lineCount, chars: charCount, messages: messageCount };
+      }
+      function queue(level, text) {
+        buffer.push([level, text]);
+        if (frame === null) frame = requestAnimationFrame(flush);
+      }
+      // Only the parent can call this; worker levels never include sys.
+      function systemRow(text) { queue('sys', text); }
+      function limitOutput() {
+        stop('limit', '输出达到上限（' + maxEntries + ' 条输出或 ' + maxChars + ' 字符），已终止');
+      }
+      function add(level, text) {
+        if (state !== 'running') return;
+        if (lineCount >= maxEntries || charCount >= maxChars) { limitOutput(); return; }
+        var remaining = Math.min(maxEntryChars, maxChars - charCount);
+        // Clip before regex work, then clip again in case a replacement grows.
+        text = clip(fixLines(clip(text, remaining)), remaining);
+        lineCount++; charCount += text.length;
+        queue(level, text);
+        snapshot();
+        if (lineCount >= maxEntries || charCount >= maxChars) limitOutput();
+      }
+      function flush() {
+        frame = null;
+        if (!buffer.length) return;
+        var frag = document.createDocumentFragment();
+        buffer.forEach(function (item) {
+          var row = document.createElement('div'); row.className = 'line ' + item[0];
+          var k = document.createElement('span'); k.className = 'k'; k.textContent = ICON[item[0]];
+          var v = document.createElement('span'); v.className = 'v'; v.textContent = item[1];
+          row.appendChild(k); row.appendChild(v); frag.appendChild(row);
+        });
+        buffer = []; out.appendChild(frag);
+        window.scrollTo(0, document.body.scrollHeight);
+      }
+      function stop(newState, message) {
+        if (state !== 'running') return;
+        state = newState;
+        if (worker) {
+          worker.onmessage = worker.onerror = worker.onmessageerror = null;
+          worker.terminate(); worker = null;
+        }
+        if (url) { URL.revokeObjectURL(url); url = null; }
+        clearTimeout(deadline); clearTimeout(idle); clearInterval(ticker);
+        if (message) systemRow(message);
+        if (lineCount === 0 && newState === 'done') systemRow('没有输出');
+        if (frame !== null) { cancelAnimationFrame(frame); frame = null; }
+        flush();
+        statusEl.setAttribute('data-state', newState);
+        labelEl.textContent = LABEL[newState];
+        timeEl.textContent = Math.round(performance.now() - t0) + ' ms';
+        snapshot();
+      }
+      function checkDeadline() {
+        if (state !== 'running') return false;
+        if (performance.now() < endsAt) return true;
+        stop('timeout', '运行超过 ' + (timeoutMs / 1000) + ' 秒，已强制终止（可能是死循环）');
+        return false;
+      }
+      // Quiet for 400 ms after main completion: later unawaited timers are terminated.
+      function armIdle() {
+        if (state !== 'running') return;
+        clearTimeout(idle);
+        idle = setTimeout(function () { if (checkDeadline()) stop('done'); }, 400);
+      }
+      window.stopRunner = function () { stop('stopped', '运行已停止'); };
+      window.addEventListener('pagehide', window.stopRunner);
+      try {
+        url = URL.createObjectURL(new Blob([HEAD, code, TAIL], { type: 'text/javascript' }));
+        stackLocation = new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':(\\d+):(\\d+)', 'g');
+        worker = new Worker(url);
+      } catch (e) {
+        stop('error', '无法启动运行环境：' + clip(typeof e.message === 'string' ? e.message : '未知错误', 1000));
+        return;
+      }
+      worker.onmessage = function (event) {
+        if (state !== 'running') return;
+        if (!checkDeadline()) return;
+        // Count every received event, including malformed, unknown, clear and completion.
+        messageCount++; snapshot();
+        if (messageCount >= maxMessages) { stop('limit', '运行消息达到上限，已终止'); return; }
+        var m = event.data;
+        if (m === null || typeof m !== 'object' || Array.isArray(m) || typeof m.t !== 'string') return;
+        if (m.t === 'log') {
+          if (typeof m.text !== 'string' || (m.level !== 'log' && m.level !== 'info' && m.level !== 'warn' && m.level !== 'error')) return;
+          add(m.level, m.text);
+        } else if (m.t === 'clear') {
+          buffer = []; out.textContent = ''; // Cumulative counters are deliberately retained.
+        } else if (m.t === 'main-done') {
+          // User code can spoof completion; early completion still terminates the worker.
+          mainDone = true;
+        } else if (m.t === 'main-error') {
+          if (typeof m.text !== 'string') return;
+          add('error', m.text); stop('error', '运行出错'); return;
+        } else if (m.t === 'limit') { limitOutput(); return; }
+        else return;
+        if (state === 'running' && mainDone) armIdle();
+      };
+      worker.onmessageerror = function () {
+        if (state !== 'running' || !checkDeadline()) return;
+        messageCount++; snapshot();
+        stop('error', '无法读取运行消息');
+      };
+      worker.onerror = function (event) {
+        if (state !== 'running') return;
+        event.preventDefault();
+        if (!checkDeadline()) return;
+        var line = event.filename === url && Number.isInteger(event.lineno) ? event.lineno - LINE_OFFSET : 0;
+        var location = line >= 1 && line <= USER_LINES ? '（第 ' + line + ' 行）' : '（运行环境）';
+        add('error', clip(typeof event.message === 'string' ? event.message : '运行出错', 9900) + location);
+        stop('error', '运行出错');
+      };
+      deadline = setTimeout(checkDeadline, timeoutMs);
+      ticker = setInterval(function () {
+        if (checkDeadline()) timeEl.textContent = Math.round(performance.now() - t0) + ' ms';
+      }, 100);
+    })();
+  </script>
+</body>
+</html>

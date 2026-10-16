@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -18,6 +19,7 @@ import org.junit.runner.RunWith
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
+@SdkSuppress(minSdkVersion=29)
 class RendererRecoveryIntegrationTest : PermissionWebViewFixture() {
     @Test fun rendererCrashShowsErrorAndNewOpenUsesFreshWebView() {
         val context = compose.activity.applicationContext
