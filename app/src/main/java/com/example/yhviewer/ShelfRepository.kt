@@ -172,6 +172,40 @@ class ShelfRepository(
         dao.updatePosition(id, locator.encode(), locator.overallProgress(chapterCount))
     }
 
+    /** 编辑只替换书架副本，原文件和所有阅读元数据保持原样。 */
+    suspend fun updateContent(id: Long, text: String): Unit = storageLock.withLock {
+        val book = dao.get(id) ?: throw IOException("书架里没有这个文档")
+        when (book.type) {
+            DocType.HTML, DocType.MARKDOWN, DocType.CODE, DocType.UNKNOWN -> Unit
+            DocType.TXT, DocType.EPUB -> throw IOException("分章节文档不支持编辑")
+        }
+        val bytes = editorTextBytes(text)
+        withContext(Dispatchers.IO) {
+            val existing = File(dir, book.localFile)
+            if (!existing.isFile || !existing.canRead()) {
+                throw IOException("本地副本丢失或无法读取，请从原文件重新打开")
+            }
+            // Verify that opening succeeds too; a provider/filesystem can deny access after canRead.
+            existing.inputStream().use { it.read() }
+        }
+        val fileName = UUID.randomUUID().toString()
+        try {
+            withContext(Dispatchers.IO) { writeAtomically(File(dir, fileName), bytes) }
+            db.withTransaction {
+                if (dao.updateContent(id, fileName, bytes.size.toLong()) != 1) {
+                    throw IOException("书架里没有这个文档")
+                }
+            }
+        } catch (e: Exception) {
+            // Room may have committed just before cancellation: never delete a referenced copy.
+            discardUnreferenced(fileName)
+            throw e
+        }
+        withContext(NonCancellable + Dispatchers.IO) {
+            File(dir, book.localFile).deleteRecursively()
+        }
+    }
+
     suspend fun setPermissions(id: Long, permissions: DocPermissions) = dao.setPermissions(id, permissions.toBits())
 
     suspend fun idsWithPersistentStorage(): Set<Long> = dao.idsWithPersistentStorage().toSet()
@@ -226,3 +260,11 @@ class ShelfRepository(
  */
 internal fun escapeLike(s: String): String =
     s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+/** The editor limit also applies to Save As, before touching the destination. */
+internal fun editorTextBytes(text: String): ByteArray {
+    if (text.length > 1_000_000) throw IOException("文档超过编辑器的 100 万字符限制")
+    return text.toByteArray(Charsets.UTF_8).also {
+        if (it.size.toLong() > DocumentLoader.MAX_TEXT_BYTES) throw IOException("文档超过文本大小限制")
+    }
+}

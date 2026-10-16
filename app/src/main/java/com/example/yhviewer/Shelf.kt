@@ -93,6 +93,9 @@ interface BookDao {
     @Query("UPDATE books SET permissions = :bits WHERE id = :id")
     suspend fun setPermissions(id: Long, bits: Int)
 
+    @Query("UPDATE books SET localFile = :file, sizeBytes = :size WHERE id = :id")
+    suspend fun updateContent(id: Long, file: String, size: Long): Int
+
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: Long)
 }

@@ -21,4 +21,5 @@ package_line=$(printf '%s\n' "$badging" | sed -n '/^package: /p')
 permissions=$("$tools/aapt2" dump permissions "$apk")
 printf '%s\n' "$package_line" "$permissions"
 "$(dirname "$0")/verify-apk-permissions.sh" "$apk" "${4:-strict}"
+python3 "$(dirname "$0")/verify-python-assets.py" "$apk" "${4:-strict}"
 printf 'Release artifact verified: %s\n' "$apk"

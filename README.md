@@ -7,7 +7,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-v0.3.0 is under validation; the latest published v0.2.0 remains the single offline edition until a new tag is published.
+**v0.3.0** includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -35,6 +35,8 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 | **HTML** | Rendered as-is in the sandbox. Per-document permissions; external links require a real tap by default |
 | **Markdown** | markdown-it + highlight.js, bundled offline. Raw HTML inside Markdown is shown as text |
 | **JavaScript execution** | Explicit Run button, isolated Worker console, 5-second timeout (optionally 30), stop/restart and bounded output; no network, DOM or device-file access |
+| **Python execution (Standard)** | Bundled offline Pyodide / CPython standard library, separate startup and execution deadlines, Unicode output and user-code error lines; no external network or package downloads |
+| **Code editing** | Offline CodeMirror 6 for code, plain text, Markdown and HTML up to 1,000,000 characters; syntax highlighting, search, undo/redo and a keyboard symbol bar. Run unsaved JS or Python snapshots |
 | **Code** | File-type detection, line numbers excluded from copied text, wrap toggle and bundled syntax highlighting. Compact JSON up to 500,000 characters is formatted; large files skip highlighting and render in 200-line chunks |
 | **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents |
 | **EPUB** | EPUB 2 and 3, title and TOC from nav / NCX, images and publisher CSS, book scripts never run |
@@ -44,12 +46,17 @@ Reading and library features:
 - **Reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Markdown, code and TXT switch in place; EPUB reloads with scripts disabled. Position is preserved approximately and code colors follow the theme. HTML retains its original appearance and has no theme menu.
 - **Book reading controls**: TXT and EPUB support immersive reading, confirmed left/right taps to move 90% of the viewport, chapter navigation, font size, line height, margins, font selection and keep-awake. Settings persist; EPUB scripts remain disabled.
 - **Reading position**: saved per document as chapter + scroll ratio, restored after theme changes, rotation and app restarts. Saves are debounced and flushed on backgrounding; an abrupt kill can lose the most recent unsaved movement. The shelf shows how far you've read.
+- **Save and Save as**: Save atomically updates only the private shelf copy; the source file is untouched. Reopening the original replaces that copy, so use Save as to retain edits in a new file. Save as also imports the new file into the shelf.
 - **Shelf**: recent files, favorites, search. Files are copied on import, so they stay readable offline after the source is deleted.
 - **Open from anywhere**: "Open with" from a file manager, "Share" from another app, or the built-in picker.
 
 | Book reading controls | Document permissions (Standard) |
 |---|---|
 | ![](docs/screenshots/reading-settings.png) | ![](docs/screenshots/permissions-standard.png) |
+
+| Editor | Run console | Document permissions (Standard) |
+|---|---|---|
+| ![](docs/screenshots/editor.png) | ![](docs/screenshots/run.png) | ![](docs/screenshots/permissions-standard.png) |
 
 ## Security model
 
@@ -104,6 +111,30 @@ The parent terminates the Worker after 5 seconds (optionally 30), at 1,000 outpu
 
 This is browser JavaScript: no Node.js APIs, TypeScript/JSX transpilation or module imports. Awaited work runs within the time limit; after top-level work finishes, the runner ends following a short quiet period, so it does not wait indefinitely for unawaited timers. A Worker shares the WebView renderer’s memory limit; a memory bomb can terminate that renderer, which the app handles without terminating its own process.
 
+## Python execution and editing
+
+Standard bundles Pyodide 0.26.4 / CPython 3.12.1 locally; Strict has no Python runtime
+or Python Run action. Python runs in a fresh Worker with an in-memory filesystem,
+only the bundled standard library and no package installation. Runtime startup has
+its own 60-second deadline; the 5- or 30-second execution deadline starts after a
+private readiness handshake. Output uses the same bounds as JavaScript. `input()`
+returns EOF with an explanation. Python can read only its bundled runtime assets;
+external requests and native files are blocked. An up-to-date WebView with
+WebAssembly support is needed (Pyodide 0.26 targets Chromium 112 or later).
+
+The trusted editor uses its own fixed CSP and never inherits an HTML document's
+permissions. Native code pulls text through `evaluateJavascript`; the page has no
+native bridge. Missing or failed editor assets refuse saving instead of returning
+empty content. The in-memory editor session preserves unsaved content across
+rotation and other Activity configuration changes; Save is needed to survive
+process death or renderer failure. Incoming file opens require a save/discard/cancel
+decision before replacing the editor. A save records the exact written snapshot, so newer keystrokes stay
+unsaved. A Worker can still exhaust renderer memory; renderer recovery applies to
+Python and the editor as well as JavaScript.
+
+See [editor build](tools/editor/README.md) and [runtime provenance and checksums](tools/pyodide/README.md)
+for reproducible bundled assets and licenses.
+
 ## Architecture
 
 ```mermaid
@@ -141,7 +172,7 @@ flowchart TB
 
 ## Testing
 
-The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. The JS runner additionally passed focused Strict/Standard checks on API 35 using a separate QA app and generated documents. Reports and debug APKs are retained as CI artifacts for 14 days.
+The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. Editor/lifecycle, native CJK input and real Python checks also passed on API 35 using a separate QA app and generated documents. The user then upgraded the official app with the signed Standard candidate and confirmed all eight existing shelf records and reading progress were retained. Reports and debug APKs are retained as CI artifacts for 14 days.
 
 | Area | Type | Covers |
 |---|---|---|
@@ -154,6 +185,8 @@ The suite includes JVM policy/template tests and native database, navigation, re
 | Permissions | JVM + instrumented | All 128 bit combinations, presets excluding iframe/network, build capabilities, independent storage, live-profile revocation, real CSP parent/iframe boundary |
 | Reading settings | JVM + instrumented | Finite normalization, safe CSS, confirmed taps, stable viewport, previous chapter end and persisted controls |
 | JS execution | JVM + instrumented | Safe source embedding, syntax/runtime line mapping, real Worker CSP, Unicode line separators, timeout, console flood/forged messages, fresh storage, live themes, stop/restart/close and renderer loss |
+| Editing | JVM + instrumented | JSON string decoding, injection-safe editor payloads, real CodeMirror, exact snapshot saves, source preservation, missing components, atomic edits and save-as |
+| Python | JVM + instrumented | Real bundled WASM and standard library, top-level await, user-code tracebacks, EOF, network blocking, startup/run budgets and forged-message limits |
 | Renderer recovery | Instrumented | Controlled renderer crash keeps the app alive, safe reopening, strict EPUB policy, UTF-16 response and profile thread guards |
 | App flows | Instrumented | Open-with, share, single-instance reuse, back-stack layering, size limits |
 
@@ -174,11 +207,11 @@ CSP-blocked requests may never reach the interceptor, so Logcat alone is insuffi
 
 Standard edition now provides the permanent network-permission test round; it checks a native HTTPS positive control and the default 9/9 sandbox result. Relaxed permissions intentionally change those expected outcomes. See [v0.3 integration verification](docs/verification/V03_VERIFICATION.md).
 
-See [JS runner verification](docs/verification/JS_RUNNER.md), [renderer recovery](docs/verification/RENDERER_RECOVERY.md), and [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
+See [editor and Python acceptance](docs/verification/EDITOR_PYTHON.md), [JS runner verification](docs/verification/JS_RUNNER.md), [renderer recovery](docs/verification/RENDERER_RECOVERY.md), and [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
 
 ## Tech stack
 
-Kotlin · Jetpack Compose (Material 3) · Android WebView + `androidx.webkit` · Room + KSP · Coroutines / Flow · markdown-it · highlight.js · JUnit4 / AndroidX Test · GitHub Actions
+Kotlin · Jetpack Compose (Material 3) · Android WebView + `androidx.webkit` · Room + KSP · Coroutines / Flow · markdown-it · highlight.js · CodeMirror 6 · Pyodide (Standard) · JUnit4 / AndroidX Test · GitHub Actions
 
 ## Build
 
@@ -197,6 +230,8 @@ cd yhviewer
 Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compressed EPUB at 100 MiB. Extracted EPUB limits are 3,000 entries, 50 MiB per entry and 200 MiB total; XML/chapter input is capped at 10 MiB each. EPUB XML/XHTML is decoded before validation and rendering, including BOM-marked UTF-16. DRM and publisher interactive features are unsupported. Big5 detection is heuristic, and scroll ratios preserve an approximate location rather than an exact paragraph.
 
 
+- [x] Offline CodeMirror editing and snapshot execution
+- [x] Standard-only offline Python execution
 - [x] Explicit JavaScript execution sandbox
 - [x] Per-document permissions and Strict / Standard editions
 - [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
@@ -207,4 +242,4 @@ Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compre
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Third-party: [markdown-it](https://github.com/markdown-it/markdown-it) (MIT), [highlight.js](https://github.com/highlightjs/highlight.js) (BSD-3-Clause), see [third-party notices](THIRD_PARTY_NOTICES.md).
+MIT, see [LICENSE](LICENSE). Third-party: [markdown-it](https://github.com/markdown-it/markdown-it) (MIT), [highlight.js](https://github.com/highlightjs/highlight.js) (BSD-3-Clause), plus CodeMirror (MIT), Pyodide (MPL-2.0) and CPython (PSF); see [third-party notices](THIRD_PARTY_NOTICES.md).

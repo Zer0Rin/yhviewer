@@ -1,0 +1,2 @@
+# Generated CodeMirror includes intentional whitespace inside completion snippets.
+app/src/main/assets/edit/cm6.bundle.js whitespace=-blank-at-eol

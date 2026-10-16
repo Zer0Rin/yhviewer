@@ -38,6 +38,8 @@ jobs:
         run: |
           scripts/verify-apk-permissions.sh app/build/outputs/apk/strict/debug/app-strict-debug.apk strict
           scripts/verify-apk-permissions.sh app/build/outputs/apk/standard/debug/app-standard-debug.apk standard
+          python3 scripts/verify-python-assets.py app/build/outputs/apk/strict/debug/app-strict-debug.apk strict
+          python3 scripts/verify-python-assets.py app/build/outputs/apk/standard/debug/app-standard-debug.apk standard
       - name: Upload unit and lint reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

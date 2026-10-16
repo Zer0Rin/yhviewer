@@ -132,8 +132,9 @@ class CodeRunnerUiTest : PermissionWebViewFixture() {
         compose.waitUntil(5_000) { var released=false;compose.runOnUiThread { released=restarted.parent==null };released }
         compose.runOnUiThread { assertNull(restarted.parent) }
         val again=start()
-        open("print('python is read only')","py")
-        compose.onNodeWithText("▶ 运行").assertDoesNotExist()
+        open("print('python runs only in Standard')","py")
+        if (AppCapabilities.pythonAvailable) compose.onNodeWithText("▶ 运行").assertIsDisplayed()
+        else compose.onNodeWithText("▶ 运行").assertDoesNotExist()
         compose.runOnUiThread { assertNull(again.parent) }
     }
 

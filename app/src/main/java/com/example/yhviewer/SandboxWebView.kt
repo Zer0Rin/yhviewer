@@ -232,6 +232,14 @@ private suspend fun WebView.restoreRatio(ratio: Float, stillCurrent: () -> Boole
     if (stillCurrent()) scrollTo(0, (ratio * maxScrollPx()).roundToInt())
 }
 
+private class ReaderAssetsHandler(context: Context) : WebViewAssetLoader.PathHandler {
+    private val delegate = WebViewAssetLoader.AssetsPathHandler(context)
+    override fun handle(path: String): WebResourceResponse? = delegate.handle(path)?.apply {
+        if (path.endsWith(".wasm")) mimeType = "application/wasm"
+        if (path.endsWith(".zip")) mimeType = "application/zip"
+    }
+}
+
 private class ScrollPosition(var ratio: Float, var reporting: Boolean = false, var initialized: Boolean = false, var epoch: Int = 0)
 
 /** HTML templates update live; EPUB keeps scripts disabled and reloads with injected CSS. */
@@ -251,6 +259,7 @@ fun HtmlView(
     permissions: DocPermissions = DocPermissions.STANDARD,
     storageProfileId: Long? = null,
     onRendererGone: () -> Unit = {},
+    handle: WebViewHandle? = null,
 ) {
     val effective = if (source is PageSource.BookFile) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
@@ -299,6 +308,7 @@ fun HtmlView(
 
     // Session removal is the ownership guard: crash cleanup and Compose onRelease can both run.
     fun releaseView(view: WebView) {
+        handle?.detach(view)
         val session = sessions.remove(view) ?: return
         val context = view.context
         position.reporting = false
@@ -327,7 +337,7 @@ fun HtmlView(
                 val localHost = session.host
                 val builder = WebViewAssetLoader.Builder()
                     .setDomain(localHost)
-                    .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                    .addPathHandler("/assets/", ReaderAssetsHandler(context))
                 val startUrl = when (source) {
                     is PageSource.Html -> {
                         builder.addPathHandler("/doc/", DocumentPathHandler(source.html, source.csp ?: CspPolicy.build(effective)))
@@ -377,6 +387,7 @@ fun HtmlView(
                     }) { latestGestures }
                     loadUrl(startUrl)
                     webView = this
+                    handle?.attach(this)
                 }
             } catch (error: Throwable) {
                 releaseView(view)
@@ -434,4 +445,36 @@ private fun WebView.installReaderGestures(context: Context, onTouch: () -> Unit,
         false
     }
     return { active = false; setOnTouchListener(null) }
+}
+
+/** Only the bundled trusted editor uses this retained view. Clients capture its session and
+ * application context, never an Activity or the departing Compose tree. */
+internal fun createRetainedEditorView(context: Context, editor: EditorSession): Pair<WebView, DocProfiles.Session> {
+    val app = context.applicationContext
+    val view = WebView(app)
+    val profile = DocProfiles.attach(view, null)
+    try {
+        val loader = WebViewAssetLoader.Builder()
+            .setDomain(profile.host)
+            .addPathHandler("/assets/", ReaderAssetsHandler(app))
+            .addPathHandler("/doc/", DocumentPathHandler(editor.html, EditorRenderer.CSP))
+            .build()
+        view.applySandboxSettings(allowJs = true)
+        view.webViewClient = SandboxClient(
+            loader = loader,
+            permissions = DocPermissions.STANDARD,
+            localHost = profile.host,
+            onHistoryChanged = {},
+            onExternalLink = {},
+            onPageLoaded = { editor.pageLoads++ },
+            onInternalLink = { true },
+            onRendererGone = { editor.rendererGone() },
+        )
+        view.loadUrl("https://${profile.host}/doc/index.html")
+        return view to profile
+    } catch (failure: Throwable) {
+        try { view.destroy() }
+        finally { DocProfiles.release(app, profile) }
+        throw failure
+    }
 }

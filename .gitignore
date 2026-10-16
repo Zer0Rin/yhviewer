@@ -16,3 +16,9 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+
+# Offline editor build dependencies
+node_modules/
+
+# Local Python tool caches
+__pycache__/

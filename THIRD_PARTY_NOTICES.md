@@ -9,3 +9,23 @@ All runtime assets are packaged locally; the app does not fetch these libraries 
 | --- | --- | --- |
 | markdown-it.min.js | https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js | 38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68 |
 | highlight.min.js | https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js | 471ef9ae90c407af440fcdc48edfeeb562106b3267bd12d99071c162fb52ed32 |
+
+## CodeMirror editor
+
+CodeMirror 6 and its bundled runtime dependencies use MIT licenses. Exact versions
+are locked in [tools/editor/package-lock.json](tools/editor/package-lock.json);
+the full notices for all 30 bundled packages are distributed in
+[app/src/main/assets/edit/LICENSES.txt](app/src/main/assets/edit/LICENSES.txt).
+The reproducible local build is described in [tools/editor/README.md](tools/editor/README.md).
+
+## Python runtime (Standard edition only)
+
+Pyodide 0.26.4 is distributed under MPL-2.0; its bundled CPython 3.12.1 includes
+the PSF license and incorporated notices. The unmodified upstream core files,
+source URLs and SHA-256 hashes are recorded in
+[tools/pyodide/provenance.json](tools/pyodide/provenance.json).
+Full [Pyodide license](tools/pyodide/LICENSE.pyodide) and
+[CPython notices](tools/pyodide/LICENSE.cpython) are also packaged with Standard.
+See [runtime reproduction and compatibility](tools/pyodide/README.md).
+Strict contains none of these Python runtime assets. Python packages are not
+downloaded at runtime.

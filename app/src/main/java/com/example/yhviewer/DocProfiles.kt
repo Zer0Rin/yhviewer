@@ -13,6 +13,7 @@ import androidx.webkit.WebViewFeature
 import java.util.UUID
 
 object AppCapabilities {
+    val pythonAvailable: Boolean = BuildConfig.PYTHON_RUNTIME
     val networkCapable: Boolean = BuildConfig.NETWORK_CAPABLE
     val persistentStorageSupported: Boolean get() = DocProfiles.isSupported()
     fun effective(p: DocPermissions): DocPermissions = p.effective(networkCapable, persistentStorageSupported)

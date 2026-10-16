@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
 
 sealed interface Screen {
     data object Shelf : Screen
@@ -133,8 +135,87 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     fun initialRatio(): Float = ratio
 
-    fun importAndOpen(uri: Uri) = load { repo.open(repo.import(uri)) }
+    var editorSession by mutableStateOf<EditorSession?>(null)
+        private set
+
+    fun startEditor(doc: OpenedDoc.Single, template: String? = null): EditorSession {
+        return editorSession ?: EditorSession(getApplication(), doc, wrap, theme, viewModelScope, template)
+            .also { editorSession = it }
+    }
+
+    fun cancelEditorLeave() {
+        editorSession?.let { it.confirmLeave = false; it.incomingUri = null }
+    }
+
+    fun finishEditor(saved: Boolean = false) {
+        val session = editorSession ?: return
+        val incoming = session.incomingUri
+        val savedBookId = session.doc.bookId.takeIf { saved }
+        editorSession = null
+        session.close()
+        if (incoming != null) load {
+            // Saving and then reimporting the same source would immediately overwrite the save.
+            val existing = savedBookId?.let {
+                AppDatabase.get(getApplication()).bookDao().findBySource(incoming.toString())
+            }
+            repo.open(if (existing?.id == savedBookId && existing != null) existing.id else repo.import(incoming))
+        }
+    }
+
+    fun importAndOpen(uri: Uri) {
+        editorSession?.let {
+            it.incomingUri = uri
+            it.confirmLeave = true
+            return
+        }
+        load { repo.open(repo.import(uri)) }
+    }
     fun openBook(id: Long) = load { repo.open(id) }
+
+    /** 保存期间允许导航；只有原来的阅读会话仍在显示时才同步它的文本。 */
+    suspend fun saveEdits(bookId: Long, text: String): Result<Unit> {
+        val session = documentSession
+        return try {
+            startup.await()?.let { throw it }
+            repo.updateContent(bookId, text)
+            val cur = current()
+            if (session == documentSession && cur is OpenedDoc.Single && cur.bookId == bookId) {
+                reader = ReaderState.Ready(cur.copy(doc = cur.doc.copy(text = text)))
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** 写到 CreateDocument 选择的新位置，关闭输出流成功后再导入书架。 */
+    suspend fun saveAs(uri: Uri, text: String): Result<Long> {
+        var outputWritten = false
+        return try {
+            startup.await()?.let { throw it }
+            val bytes = editorTextBytes(text)
+            val app = getApplication<Application>()
+            // Guard every known original, including the document the user just navigated away from.
+            if (AppDatabase.get(app).bookDao().findBySource(uri.toString()) != null) {
+                throw IOException("另存为请选择新文件，不能覆盖原文件")
+            }
+            withContext(Dispatchers.IO) {
+                val output = app.contentResolver.openOutputStream(uri, "wt")
+                    ?: throw IOException("无法写入所选位置")
+                output.use { it.write(bytes) }
+                outputWritten = true
+            }
+            Result.success(repo.import(uri))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(if (outputWritten) {
+                IOException("文件已写入所选位置，但加入书架失败：${e.message ?: e.javaClass.simpleName}", e)
+            } else e)
+        }
+    }
 
     private fun load(block: suspend () -> OpenedDoc) {
         flushPosition() // 从一本直接跳到另一本时，先保存上一本的位置
@@ -207,9 +288,17 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun backToShelf() {
+        editorSession?.close()
+        editorSession = null
         flushPosition()
         loadJob?.cancel()
         screen = Screen.Shelf
+    }
+
+    override fun onCleared() {
+        editorSession?.close()
+        editorSession = null
+        super.onCleared()
     }
 
     private fun current(): OpenedDoc? =
