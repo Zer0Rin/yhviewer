@@ -143,6 +143,7 @@ private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: M
             wrap = vm.wrap.takeIf { doc.doc.type in setOf(DocType.CODE, DocType.UNKNOWN) },
             initialRatio = vm.initialRatio(),
             onRatioChanged = { vm.onScroll(session, 0, it) },
+            onRendererGone = { vm.onRendererGone(session, 0) },
             permissions = if (doc.doc.type == DocType.HTML) doc.permissions else DocPermissions.STANDARD,
             storageProfileId = doc.bookId.takeIf { doc.doc.type == DocType.HTML },
         )
@@ -253,6 +254,7 @@ private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGest
                 reading = vm.reading.toCss(),
                 initialRatio = vm.initialRatio(),
                 onRatioChanged = { vm.onScroll(session, index, it) },
+                onRendererGone = { vm.onRendererGone(session, index) },
                 gestures = gestures,
             )
         }
@@ -264,6 +266,7 @@ private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGest
                 modifier = modifier,
                 initialRatio = vm.initialRatio(),
                 onRatioChanged = { vm.onScroll(session, index, it) },
+                onRendererGone = { vm.onRendererGone(session, index) },
                 onInternalLink = vm::onBookLink,
                 bookTheme = { vm.theme },
                 bookReadingCss = { vm.reading.toCss() },

@@ -204,7 +204,7 @@ object EpubParser {
     private fun readXmlText(file: File): String {
         if (!file.isFile) throw EpubFormatException("EPUB 缺少文件：${file.name}")
         if (file.length() > MAX_XML_BYTES) throw EpubFormatException("XML 文件过大：${file.name}")
-        val text = file.readBytes().toString(Charsets.UTF_8)
+        val text = CharsetDetector.decode(file.readBytes()).text
         if (text.contains("<!ENTITY")) throw EpubFormatException("XML 含实体声明，已拒绝：${file.name}")
         return text
     }
@@ -225,7 +225,7 @@ object EpubParser {
         return factory.newDocumentBuilder().apply {
             // Fail closed even on Android parsers that do not support all feature flags.
             setEntityResolver { _, _ -> InputSource(StringReader("")) }
-        }.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+        }.parse(InputSource(StringReader(text)))
     }
 
     private fun DocumentBuilderFactory.trySetFeature(name: String, value: Boolean) {

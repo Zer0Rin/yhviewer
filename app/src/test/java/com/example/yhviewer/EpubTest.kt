@@ -245,6 +245,22 @@ class EpubValidationTest {
         return EpubParser.parse(dir)
     }
 
+    @Test fun utf16MetadataAndChaptersAreDecodedBeforeParsing() {
+        val book=parse("META-INF/container.xml" to CONTAINER.toByteArray(Charsets.UTF_16),
+            "OEBPS/content.opf" to opf(false).replace("UTF-8","UTF-16").toByteArray(Charsets.UTF_16),
+            "OEBPS/text/ch 1.xhtml" to CHAPTER.replace("UTF-8","UTF-16").toByteArray(Charsets.UTF_16),
+            "OEBPS/text/ch2.xhtml" to CHAPTER.b())
+        assertEquals("夜车",book.title)
+        assertEquals(2,book.chapters.size)
+    }
+
+    @Test(expected = EpubFormatException::class)
+    fun utf16EntitiesAreRejectedBeforeReachingTheRenderer() {
+        val unsafe="""<!DOCTYPE html [<!ENTITY secret SYSTEM "file:///secret">]><html><body>&secret;</body></html>"""
+        parse("META-INF/container.xml" to CONTAINER.b(),"OEBPS/content.opf" to opf(false).b(),
+            "OEBPS/text/ch 1.xhtml" to unsafe.toByteArray(Charsets.UTF_16),"OEBPS/text/ch2.xhtml" to CHAPTER.b())
+    }
+
     @Test(expected = EpubFormatException::class)
     fun missingSpineChapterDoesNotSilentlyDisappear() {
         parse("META-INF/container.xml" to CONTAINER.b(), "OEBPS/content.opf" to opf(false).b(),

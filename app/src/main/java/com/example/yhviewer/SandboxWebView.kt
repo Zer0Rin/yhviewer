@@ -3,12 +3,14 @@ package com.example.yhviewer
 import android.animation.ObjectAnimator
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ViewGroup
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -72,6 +74,8 @@ object Sandbox {
         "https://$HOST/book/" + path.split('/').joinToString("/") { Uri.encode(it) }
 }
 
+const val RENDERER_GONE_MESSAGE = "页面渲染进程已终止（可能是资源不足或渲染异常）"
+
 /** WebView 要显示的内容 */
 sealed interface PageSource {
     /** 我们生成的整页 HTML，挂在 /doc/index.html */
@@ -113,7 +117,7 @@ private class EpubPathHandler(
         val lower = path.lowercase()
         val isChapter = lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")
         if (!isChapter) return noStoreResponse(res.mimeType, res.encoding, Sandbox.BOOK_CSP, res.data)
-        val text = res.data?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return res
+        val text = res.data?.use { CharsetDetector.decode(it.readBytes()).text } ?: return res
         val injected = EpubInjector.inject(text, theme(), readingCss()).toByteArray(Charsets.UTF_8)
         return noStoreResponse(res.mimeType, "utf-8", Sandbox.BOOK_CSP, ByteArrayInputStream(injected))
     }
@@ -127,6 +131,7 @@ private class SandboxClient(
     private val onExternalLink: (Uri) -> Unit,
     private val onPageLoaded: (WebView) -> Unit,
     private val onInternalLink: (Uri) -> Boolean,
+    private val onRendererGone: (WebView) -> Unit,
 ) : WebViewClient() {
 
     // 跑在后台线程，不能直接改 Compose 状态
@@ -157,6 +162,13 @@ private class SandboxClient(
                 true
             }
         }
+    }
+
+    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+        Log.w(Sandbox.TAG, "renderer gone, didCrash=${detail.didCrash()}")
+        // Every affected WebView handles its own callback; renderers may be shared.
+        onRendererGone(view)
+        return true
     }
 
     override fun onPageFinished(view: WebView, url: String?) {
@@ -238,11 +250,13 @@ fun HtmlView(
     gestures: ReaderGestures? = null,
     permissions: DocPermissions = DocPermissions.STANDARD,
     storageProfileId: Long? = null,
+    onRendererGone: () -> Unit = {},
 ) {
-    val effective = AppCapabilities.effective(permissions)
+    val effective = if (source is PageSource.BookFile) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
     val touchCleanup = remember { mutableMapOf<WebView, () -> Unit>() }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var rendererGone by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
     var pageLoads by remember { mutableIntStateOf(0) }
     val position = remember { ScrollPosition(initialRatio.coerceIn(0f, 1f)) }
@@ -251,6 +265,7 @@ fun HtmlView(
     val latestBookTheme by rememberUpdatedState(bookTheme)
     val latestBookReading by rememberUpdatedState(bookReadingCss)
     val latestGestures by rememberUpdatedState(gestures)
+    val latestOnRendererGone by rememberUpdatedState(onRendererGone)
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
 
@@ -282,68 +297,93 @@ fun HtmlView(
         }
     }
 
+    // Session removal is the ownership guard: crash cleanup and Compose onRelease can both run.
+    fun releaseView(view: WebView) {
+        val session = sessions.remove(view) ?: return
+        val context = view.context
+        position.reporting = false
+        position.epoch++
+        touchCleanup.remove(view)?.invoke()
+        view.setOnScrollChangeListener(null)
+        view.animate().cancel()
+        if (webView === view) webView = null
+        (view.parent as? ViewGroup)?.removeView(view)
+        try { view.destroy() }
+        finally { DocProfiles.release(context, session) }
+    }
+
+    if (rendererGone) {
+        CenterText(RENDERER_GONE_MESSAGE, modifier)
+        return
+    }
+
     AndroidView(
         modifier = modifier,
         factory = { context ->
             val view = WebView(context)
             val session = DocProfiles.attach(view, storageProfileId.takeIf { effective.persistentStorage })
             sessions[view] = session
-            val localHost = session.host
-            val builder = WebViewAssetLoader.Builder()
-                .setDomain(localHost)
-                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-            val startUrl = when (source) {
-                is PageSource.Html -> {
-                    builder.addPathHandler("/doc/", DocumentPathHandler(source.html, CspPolicy.build(effective)))
-                    "https://$localHost/doc/index.html"
-                }
-                is PageSource.BookFile -> {
-                    builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir, { latestBookTheme() }, { latestBookReading() }))
-                    Sandbox.bookUrl(source.path).replace(Sandbox.HOST, localHost) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
-                }
-            }
-            val loader = builder.build()
-            view.apply {
-                applySandboxSettings(allowJs = source is PageSource.Html && effective.scripts)
-                webViewClient = SandboxClient(
-                    loader = loader,
-                    permissions = if (source is PageSource.BookFile) DocPermissions.STRICT else effective,
-                    localHost = localHost,
-                    onHistoryChanged = { canGoBack = it },
-                    onExternalLink = { uri -> openExternal(context, uri) },
-                    onPageLoaded = { pageLoads++ },
-                    onInternalLink = { uri ->
-                        val path = uri.path.orEmpty()
-                        if (path.startsWith("/book/")) latestOnLink(path.removePrefix("/book/"), uri.fragment) else false
-                    },
-                )
-                setOnScrollChangeListener { _, _, _, _, _ ->
-                    if (position.reporting) {
-                        position.ratio = scrollRatio()
-                        latestOnRatio(position.ratio)
+            try {
+                val localHost = session.host
+                val builder = WebViewAssetLoader.Builder()
+                    .setDomain(localHost)
+                    .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                val startUrl = when (source) {
+                    is PageSource.Html -> {
+                        builder.addPathHandler("/doc/", DocumentPathHandler(source.html, CspPolicy.build(effective)))
+                        "https://$localHost/doc/index.html"
+                    }
+                    is PageSource.BookFile -> {
+                        builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir, { latestBookTheme() }, { latestBookReading() }))
+                        Sandbox.bookUrl(source.path).replace(Sandbox.HOST, localHost) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
                     }
                 }
-                touchCleanup[this] = installReaderGestures(context, onTouch = {
-                    // A real touch takes priority over a pending initial/reflow restoration.
-                    position.epoch++
-                    position.initialized = true
-                    position.reporting = true
-                    position.ratio = scrollRatio()
-                    latestOnRatio(position.ratio)
-                }) { latestGestures }
-                loadUrl(startUrl)
-                webView = this
+                val loader = builder.build()
+                view.apply {
+                    applySandboxSettings(allowJs = source is PageSource.Html && effective.scripts)
+                    webViewClient = SandboxClient(
+                        loader = loader,
+                        permissions = effective,
+                        localHost = localHost,
+                        onHistoryChanged = { canGoBack = it },
+                        onExternalLink = { uri -> openExternal(context, uri) },
+                        onPageLoaded = { pageLoads++ },
+                        onRendererGone = { dead ->
+                            if (sessions.containsKey(dead)) {
+                                canGoBack = false
+                                rendererGone = true
+                                try { releaseView(dead) }
+                                finally { latestOnRendererGone() }
+                            }
+                        },
+                        onInternalLink = { uri ->
+                            val path = uri.path.orEmpty()
+                            if (path.startsWith("/book/")) latestOnLink(path.removePrefix("/book/"), uri.fragment) else false
+                        },
+                    )
+                    setOnScrollChangeListener { _, _, _, _, _ ->
+                        if (position.reporting) {
+                            position.ratio = scrollRatio()
+                            latestOnRatio(position.ratio)
+                        }
+                    }
+                    touchCleanup[this] = installReaderGestures(context, onTouch = {
+                        // A real touch takes priority over a pending initial/reflow restoration.
+                        position.epoch++
+                        position.initialized = true
+                        position.reporting = true
+                        position.ratio = scrollRatio()
+                        latestOnRatio(position.ratio)
+                    }) { latestGestures }
+                    loadUrl(startUrl)
+                    webView = this
+                }
+            } catch (error: Throwable) {
+                releaseView(view)
+                throw error
             }
         },
-        onRelease = {
-            position.reporting = false
-            it.setOnScrollChangeListener(null)
-            touchCleanup.remove(it)?.invoke()
-            it.animate().cancel()
-            webView = null
-            it.destroy()
-            sessions.remove(it)?.let { session -> DocProfiles.release(it.context, session) }
-        },
+        onRelease = ::releaseView,
     )
 }
 

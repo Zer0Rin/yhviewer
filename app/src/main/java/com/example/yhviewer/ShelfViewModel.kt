@@ -125,6 +125,12 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private var loadJob: Job? = null
     private var saveJob: Job? = null
 
+    fun onRendererGone(forSession: Int, forChapter: Int) {
+        if (forSession != documentSession || forChapter != chapter || current() == null) return
+        flushPosition()
+        reader = ReaderState.Error(RENDERER_GONE_MESSAGE)
+    }
+
     fun initialRatio(): Float = ratio
 
     fun importAndOpen(uri: Uri) = load { repo.open(repo.import(uri)) }

@@ -71,6 +71,8 @@ HTML permissions are stored per document. Markdown, code and TXT always use the 
 
 Iframes and active networking require explicit manual grants and show warnings. Strict edition disables all four network-related switches. These are presets, not stored tier names: old combinations that include iframe access appear as Custom.
 
+Inline scripts and `eval` are deliberately allowed by the default Standard document preset: an imported HTML file is treated as untrusted code, and its interaction is intentional. Here CSP constrains network/resource capabilities rather than attempting to prevent all script execution or XSS. The Strict preset disables scripts.
+
 **Known boundaries:** third-party iframe documents do not inherit the parent document's CSP and may connect freely when iframe access is granted. Image, media and iframe URLs can carry document data to an external server. Disabling fetch/XHR/WebSocket does not promise that no data can leave a document after external resources or scripted external links are allowed. Only Strict's missing OS network permission prevents app networking entirely; handing a link to a browser is a separate user-visible action.
 
 Plus:
@@ -179,7 +181,7 @@ cd yhviewer
 
 ## Limitations & roadmap
 
-Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compressed EPUB at 100 MiB. Extracted EPUB limits are 3,000 entries, 50 MiB per entry and 200 MiB total; XML/chapter input is capped at 10 MiB each. EPUB XML/XHTML currently uses UTF-8. DRM and publisher interactive features are unsupported. Big5 detection is heuristic, and scroll ratios preserve an approximate location rather than an exact paragraph.
+Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compressed EPUB at 100 MiB. Extracted EPUB limits are 3,000 entries, 50 MiB per entry and 200 MiB total; XML/chapter input is capped at 10 MiB each. EPUB XML/XHTML is decoded before validation and rendering, including BOM-marked UTF-16. DRM and publisher interactive features are unsupported. Big5 detection is heuristic, and scroll ratios preserve an approximate location rather than an exact paragraph.
 
 
 - [x] Per-document permissions and Strict / Standard editions
