@@ -1,9 +1,9 @@
 # Editor and Python integration (v0.3.0 candidate)
 
-This document describes acceptance of the v6 integration, based on merged PR #2.
-It is not confirmation that a public v0.3.0 release or a user-owned upgrade has
-happened. The officially signed upgrade and eight-record/progress check are still
-a separate release gate in RELEASE.md.
+This records acceptance of the v6 integration, based on merged PR #2, on
+2026-10-16. The user installed the officially signed Standard candidate over the
+existing app and confirmed all eight shelf records and reading progress remained.
+Public publication is performed separately by the tag-triggered release workflow.
 
 ## Assets and build
 
@@ -63,9 +63,8 @@ phone's existing officially signed app remains separate until the user performs
 the final upgrade check. Chinese composition tests use the actual Chromium input
 connection; they do not stand in for every OEM keyboard's candidate UI.
 
-The local complete/focused test results, current screenshots and final CI run are
-recorded after the final source checks. Historical v0.2.0 results are not used as
-proof of this version's formal upgrade acceptance.
+Historical v0.2.0 results are not used as proof of this version's formal upgrade
+acceptance. Current results and reproducible captures follow below.
 
 
 ## Final focused evidence
@@ -84,7 +83,37 @@ proof of this version's formal upgrade acceptance.
 - The initial complete local device rounds exposed two old expectations: the SAF
   harness incorrectly forced RESUMED, and a v5 UI assertion still expected Python
   to have no Run button in Standard. Both were corrected and independently rerun;
-  fresh complete suites and CI remain the final integration check.
+  fresh complete suites and CI subsequently passed.
 - Editor, Python console and permissions PNGs are native API 37 captures of
   fictional documents. Capturing waits for the WebView visual-state fence and a
   visible draw instead of assuming a ready JS API means pixels were painted.
+
+
+## Completed integration gates
+
+| Check | Result |
+|---|---|
+| JVM tests | 145 per edition; zero failures/errors/skips |
+| Lint and compilation | Both editions passed |
+| API 37 complete native suites | Strict 93/93, Standard 102/102 |
+| API 34 GitHub CI | Both complete native suites and build/unit/Lint jobs passed |
+| Native API 35 editor input | 3/3; Sogou candidate entry additionally checked by the user |
+| Real Pyodide browser/CSP harness | 23/23 |
+| API 37 development-signed R8 | Native startup, JS output, real Python WASM/stdlib, editor input/pull decoding/atomic save passed |
+| Official signed candidate | Both APKs passed signature, version, applicationId, final permission and exact Python asset/hash checks; API 34 optimized startup passed |
+| Official API 35 upgrade | versionName 0.3.0 / versionCode 4; original first-install time retained; user confirmed eight records and progress remained |
+
+Evidence: [complete API 34 CI](https://github.com/Zer0Rin/yhviewer/actions/runs/38912478875),
+[PR checks](https://github.com/Zer0Rin/yhviewer/actions/runs/38912585005),
+[official candidate build](https://github.com/Zer0Rin/yhviewer/actions/runs/38912555528),
+and [PR #3](https://github.com/Zer0Rin/yhviewer/pull/3). Manual candidate dispatch
+successfully skipped Create GitHub Release; it did not publish a release or tag.
+
+Candidate source: `d1c827da43a692d289c3d893024bfae438dff04f`.
+Standard SHA-256: `16fba6206142fa99639f3b62a6917564a35ee86f11b51792bc65f883c21eaf70`.
+Strict SHA-256: `ef225f370fca707c4ffeaaf4175a428942fef35e9bef15198499377085f8c194`.
+The candidate is separate from any subsequent tag-build APK; use each published
+artifact's own SHA256SUMS rather than assuming identical build bytes.
+
+The physical upgrade was human-verified. Automation read only package version/
+installation-time metadata, not the user's official database or documents.

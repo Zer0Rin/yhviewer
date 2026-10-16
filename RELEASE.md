@@ -2,7 +2,7 @@
 
 当前准备版本：`0.3.0`（versionCode `4`），正式 applicationId：`io.github.zer0rin.yhviewer`。
 
-正式密钥和 GitHub Secrets 已配置，v0.2.0 签名 R8 包已完成 API 35 真机冒烟；v0.3.0 需要重新验收；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。手动运行 Release 工作流只构建正式签名候选包；推送版本 tag 才会创建公开 Release。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
+正式密钥和 GitHub Secrets 已配置，v0.2.0 签名 R8 包已完成 API 35 真机冒烟；v0.3.0 正式签名 Standard 候选已由用户覆盖安装，并确认 8 条记录与阅读进度保留；详见 [本轮验收](docs/verification/EDITOR_PYTHON.md)；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。手动运行 Release 工作流只构建正式签名候选包；推送版本 tag 才会创建公开 Release。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
 
 ## 一次性准备
 
@@ -112,11 +112,11 @@ Strict / Standard 使用同一 applicationId 和正式签名，可覆盖安装�
 只上传 `signed-candidate-v0.3.0-<commit>` artifact，不创建 tag 或公开 Release。
 下载并核对 SHA256 后，先验收候选包，再推送版本 tag。
 
-- [ ] CodeMirror 编辑、中文输入法和符号栏正常；保存只改书架副本，另存为生成新文件
-- [ ] 未保存修改离开有确认；编辑时旋转屏幕和外部打开文档不会静默丢失草稿
-- [ ] Standard 真实 Python 标准库、报错行号、超时和断网运行通过；Strict 没有 Python 入口和资源
-- [ ] 两个 APK 的 Python 文件边界、上游 SHA256 / 许可证以及 INTERNET 权限检查通过
-- [ ] 用户亲自用正式签名 Standard 候选包覆盖安装，确认原来的 8 条书架记录和阅读进度仍在
+- [x] CodeMirror 编辑、中文输入法和符号栏正常；保存只改书架副本，另存为生成新文件
+- [x] 未保存修改离开有确认；编辑时旋转屏幕和外部打开文档不会静默丢失草稿
+- [x] Standard 真实 Python 标准库、报错行号、超时和断网运行通过；Strict 没有 Python 入口和资源
+- [x] 两个 APK 的 Python 文件边界、上游 SHA256 / 许可证以及 INTERNET 权限检查通过
+- [x] 用户亲自用正式签名 Standard 候选包覆盖安装，确认原来的 8 条书架记录和阅读进度仍在
 
 自动化真机验收使用独立 QA applicationId 和本轮新建测试文档；不得读取或修改手机原有文档，
 也不读取正式应用的私有数据库。最后一项由用户检查，未确认前不打 tag。

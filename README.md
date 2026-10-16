@@ -7,7 +7,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-v0.3.0 is under validation; the latest published v0.2.0 remains the single offline edition until a new tag is published.
+**v0.3.0** includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -172,7 +172,7 @@ flowchart TB
 
 ## Testing
 
-The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. The JS runner additionally passed focused Strict/Standard checks on API 35 using a separate QA app and generated documents. Reports and debug APKs are retained as CI artifacts for 14 days.
+The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. Editor/lifecycle, native CJK input and real Python checks also passed on API 35 using a separate QA app and generated documents. The user then upgraded the official app with the signed Standard candidate and confirmed all eight existing shelf records and reading progress were retained. Reports and debug APKs are retained as CI artifacts for 14 days.
 
 | Area | Type | Covers |
 |---|---|---|
