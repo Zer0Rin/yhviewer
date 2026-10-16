@@ -73,7 +73,7 @@ fun ReaderScreen(vm: ShelfViewModel) {
     }
 }
 
-private data class RunRequest(val code: String, val fileName: String)
+private data class RunRequest(val code: String, val fileName: String, val lang: CodeRunner.Lang)
 
 // ======================= 单页文档 =======================
 
@@ -82,6 +82,10 @@ private data class RunRequest(val code: String, val fileName: String)
 private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     val doc = (state as? ReaderState.Ready)?.doc as? OpenedDoc.Single
     val type = doc?.doc?.type
+    if (vm.editorSession != null && doc != null) {
+        EditorScreen(vm, doc) {}
+        return
+    }
     var menuOpen by remember { mutableStateOf(false) }
     var permissionsOpen by remember { mutableStateOf(false) }
     // Retain the source across reader errors; renderer loss can affect both WebViews.
@@ -94,8 +98,12 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                 title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                 actions = {
-                    if (doc != null && type == DocType.CODE && CodeRunner.isRunnable(CodeLanguages.forFileName(doc.name))) {
-                        TextButton(onClick = { runRequest = RunRequest(doc.doc.text, doc.name) }) { Text("▶ 运行") }
+                    val runLang = doc?.let { CodeRunner.runnableLang(CodeLanguages.forFileName(it.name), AppCapabilities.pythonAvailable) }
+                    if (doc != null && type == DocType.CODE && runLang != null) {
+                        TextButton(onClick = { runRequest = RunRequest(doc.doc.text, doc.name, runLang) }) { Text("▶ 运行") }
+                    }
+                    if (doc != null && EditorRenderer.canEdit(doc.doc.text)) {
+                        TextButton(onClick = { vm.startEditor(doc) }) { Text("编辑") }
                     }
                     if (doc != null && type == DocType.HTML) {
                         if (AppCapabilities.effective(doc.permissions).isRelaxed) Text("已放宽", color = MaterialTheme.colorScheme.error)
@@ -133,7 +141,7 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
         }
     }
     runRequest?.let { request ->
-        RunSheet(request.code, request.fileName, vm.theme, onDismiss = { runRequest = null })
+        RunSheet(request.code, request.fileName, vm.theme, lang = request.lang, onDismiss = { runRequest = null })
     }
     if (permissionsOpen && doc != null && type == DocType.HTML) {
         PermissionSheet(doc.permissions, { vm.setPermissions(doc.bookId, it) }, { permissionsOpen = false })

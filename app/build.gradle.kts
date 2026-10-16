@@ -36,11 +36,13 @@ android {
         create("strict") {
             dimension = "network"
             buildConfigField("boolean", "NETWORK_CAPABLE", "false")
+            buildConfigField("boolean", "PYTHON_RUNTIME", "false")
         }
         create("standard") {
             dimension = "network"
             isDefault = true
             buildConfigField("boolean", "NETWORK_CAPABLE", "true")
+            buildConfigField("boolean", "PYTHON_RUNTIME", "true")
         }
     }
 

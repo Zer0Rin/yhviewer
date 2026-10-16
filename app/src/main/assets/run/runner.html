@@ -56,6 +56,7 @@
     (function () {
       var p = JSON.parse(document.getElementById('payload').textContent);
       var code = p.code; // Preserve string and template-literal source semantics.
+      var isPython = p.lang === 'python';
       function boundedInt(value, fallback, maximum) {
         return Number.isInteger(value) && value > 0 ? Math.min(value, maximum) : fallback;
       }
@@ -225,6 +226,86 @@
       // Async wrapping supports await; it is not an ES module.
       var HEAD = PRELUDE + '\n(async function () {\n';
       var TAIL = '\n})().then(function () { __control({ t: "main-done" }); }, __fail);\n';
+      // Private startup port is closed before user code runs. Ordinary postMessage
+      // events (including forged ready messages from Python's js module) cannot reset clocks.
+      function pythonWorker() {
+        self.onmessage = async function (event) {
+          self.onmessage = null;
+          var code = event.data.code, base = event.data.base, control = event.ports[0], py;
+          function streamWriter(level) {
+            var decoder = new TextDecoder(), pending = '';
+            function consume(text) {
+              for (var i = 0; i < text.length && !__limited; i++) {
+                if (text[i] === '\n') { __send(level, [pending]); pending = ''; }
+                else {
+                  pending += text[i];
+                  if (pending.length >= 10000) { __send(level, [pending]); pending = ''; }
+                }
+              }
+            }
+            return {
+              write: function (bytes) {
+                for (var i = 0; i < bytes.length && !__limited; i += 4096)
+                  consume(decoder.decode(bytes.subarray(i, i + 4096), { stream: true }));
+                // A Python flush is a write, not necessarily a newline or fsync.
+                // Deliver available text now so timeout/Stop cannot discard flushed output.
+                if (pending) { __send(level, [pending]); pending = ''; }
+                return bytes.length;
+              },
+              flush: function () { consume(decoder.decode()); if (pending) { __send(level, [pending]); pending = ''; } }
+            };
+          }
+          var stdout = streamWriter('log'), stderr = streamWriter('error');
+          try {
+            importScripts(base + '/assets/pyodide/pyodide.js');
+            py = await loadPyodide({
+              indexURL: base + '/assets/pyodide/',
+              stdout: function (text) { __send('log', [text]); },
+              stderr: function (text) { __send('error', [text]); }
+            });
+            py.setStdout(stdout); py.setStderr(stderr);
+            py.setStdin({ stdin: function () { return undefined; } });
+          } catch (error) {
+            __control({ t: 'load-error', text: __format([error], 10000) });
+            control.close(); return;
+          }
+          await new Promise(function (resolve) {
+            control.onmessage = function () { control.close(); resolve(); };
+            control.postMessage('ready');
+          });
+          // Retain the original stream flush methods before user code can replace sys.stdout.
+          // Batched Pyodide callbacks otherwise omit print(..., end='') on completion/error.
+          var flushOutput = py.runPython("lambda out=__import__('sys').stdout.flush, err=__import__('sys').stderr.flush: (out(), err())");
+          try {
+            var result = await py.runPythonAsync(code, { filename: '<exec>' });
+            if (result && typeof result.destroy === 'function') result.destroy();
+            flushOutput(); stdout.flush(); stderr.flush();
+            __control({ t: 'main-done' });
+          } catch (error) {
+            try { flushOutput(); } catch (_) {}
+            stdout.flush(); stderr.flush();
+            __control({ t: 'main-error', text: __format([typeof error.message === 'string' ? error.message : error], 10000) });
+          } finally {
+            flushOutput.destroy();
+          }
+        };
+      }
+      var PY_WORKER = '(function () {\n' + PRELUDE + '\n(' + pythonWorker.toString() + ')();\n})();';
+      function cleanPyTraceback(text) {
+        var kept = [], skipping = false;
+        text.split('\n').forEach(function (line) {
+          var match = /^\s*File "([^"]+)", line (\d+)(.*)$/.exec(line);
+          if (match) {
+            skipping = match[1] !== '<exec>';
+            if (!skipping) kept.push('  第 ' + match[2] + ' 行' + match[3]);
+          } else if (!(skipping && /^\s{4,}/.test(line))) {
+            skipping = false; kept.push(line);
+          }
+        });
+        var text = kept.join('\n').trim();
+        if (/EOFError/.test(text)) text += '\n（提示：运行环境没有键盘输入，input() 无法使用）';
+        return text;
+      }
       var LINE_OFFSET = HEAD.split('\n').length - 1;
       var USER_LINES = code.split(/\r\n|[\n\r\u2028\u2029]/).length;
       var url = null, stackLocation = null;
@@ -239,12 +320,12 @@
       var out = document.getElementById('out');
       var buffer = [], frame = null, lineCount = 0, charCount = 0, messageCount = 0;
       var ICON = { log: '›', info: 'i', warn: '!', error: '✕', sys: '·' };
-      var state = 'running', t0 = performance.now(), endsAt = t0 + timeoutMs;
+      var state = 'running', loading = isPython, t0 = performance.now(), endsAt = t0 + (loading ? 60000 : timeoutMs);
       var statusEl = document.getElementById('status');
       var labelEl = document.getElementById('label');
       var timeEl = document.getElementById('time');
       var LABEL = { done: '完成', error: '出错', timeout: '超时', limit: '输出过多', stopped: '已停止' };
-      var worker = null, deadline, idle, ticker, mainDone = false;
+      var worker = null, startup = null, deadline, idle, ticker, mainDone = false;
       window.__runResult = { state: state, lines: 0, chars: 0, messages: 0 };
       function snapshot() {
         window.__runResult = { state: state, lines: lineCount, chars: charCount, messages: messageCount };
@@ -263,7 +344,7 @@
         if (lineCount >= maxEntries || charCount >= maxChars) { limitOutput(); return; }
         var remaining = Math.min(maxEntryChars, maxChars - charCount);
         // Clip before regex work, then clip again in case a replacement grows.
-        text = clip(fixLines(clip(text, remaining)), remaining);
+        text = clip((isPython ? function (value) { return value; } : fixLines)(clip(text, remaining)), remaining);
         lineCount++; charCount += text.length;
         queue(level, text);
         snapshot();
@@ -290,6 +371,7 @@
           worker.terminate(); worker = null;
         }
         if (url) { URL.revokeObjectURL(url); url = null; }
+        if (startup) { startup.onmessage = null; startup.close(); startup = null; }
         clearTimeout(deadline); clearTimeout(idle); clearInterval(ticker);
         if (message) systemRow(message);
         if (lineCount === 0 && newState === 'done') systemRow('没有输出');
@@ -303,7 +385,7 @@
       function checkDeadline() {
         if (state !== 'running') return false;
         if (performance.now() < endsAt) return true;
-        stop('timeout', '运行超过 ' + (timeoutMs / 1000) + ' 秒，已强制终止（可能是死循环）');
+        stop('timeout', loading ? 'Python 运行环境加载超时' : '运行超过 ' + (timeoutMs / 1000) + ' 秒，已强制终止（可能是死循环）');
         return false;
       }
       // Quiet for 400 ms after main completion: later unawaited timers are terminated.
@@ -315,7 +397,7 @@
       window.stopRunner = function () { stop('stopped', '运行已停止'); };
       window.addEventListener('pagehide', window.stopRunner);
       try {
-        url = URL.createObjectURL(new Blob([HEAD, code, TAIL], { type: 'text/javascript' }));
+        url = URL.createObjectURL(new Blob(isPython ? [PY_WORKER] : [HEAD, code, TAIL], { type: 'text/javascript' }));
         stackLocation = new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':(\\d+):(\\d+)', 'g');
         worker = new Worker(url);
       } catch (e) {
@@ -340,7 +422,10 @@
           mainDone = true;
         } else if (m.t === 'main-error') {
           if (typeof m.text !== 'string') return;
-          add('error', m.text); stop('error', '运行出错'); return;
+          add('error', isPython ? cleanPyTraceback(clip(m.text, maxEntryChars)) : m.text); stop('error', '运行出错'); return;
+        } else if (m.t === 'load-error' && isPython && loading) {
+          if (typeof m.text !== 'string') return;
+          add('error', m.text); stop('error', 'Python 运行环境加载失败'); return;
         } else if (m.t === 'limit') { limitOutput(); return; }
         else return;
         if (state === 'running' && mainDone) armIdle();
@@ -354,12 +439,24 @@
         if (state !== 'running') return;
         event.preventDefault();
         if (!checkDeadline()) return;
-        var line = event.filename === url && Number.isInteger(event.lineno) ? event.lineno - LINE_OFFSET : 0;
+        var line = !isPython && event.filename === url && Number.isInteger(event.lineno) ? event.lineno - LINE_OFFSET : 0;
         var location = line >= 1 && line <= USER_LINES ? '（第 ' + line + ' 行）' : '（运行环境）';
         add('error', clip(typeof event.message === 'string' ? event.message : '运行出错', 9900) + location);
         stop('error', '运行出错');
       };
-      deadline = setTimeout(checkDeadline, timeoutMs);
+      if (isPython) {
+        labelEl.textContent = '正在加载 Python 运行环境…';
+        var channel = new MessageChannel(); startup = channel.port1;
+        startup.onmessage = function (event) {
+          if (event.data !== 'ready' || !loading || !checkDeadline()) return;
+          loading = false; t0 = performance.now(); endsAt = t0 + timeoutMs;
+          clearTimeout(deadline); deadline = setTimeout(checkDeadline, timeoutMs);
+          labelEl.textContent = '运行中…';
+          startup.postMessage('run'); startup.close(); startup = null;
+        };
+        worker.postMessage({ code: code, base: location.origin }, [channel.port2]);
+      }
+      deadline = setTimeout(checkDeadline, loading ? 60000 : timeoutMs);
       ticker = setInterval(function () {
         if (checkDeadline()) timeEl.textContent = Math.round(performance.now() - t0) + ' ms';
       }, 100);

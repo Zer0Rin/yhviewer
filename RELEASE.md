@@ -2,7 +2,7 @@
 
 当前准备版本：`0.3.0`（versionCode `4`），正式 applicationId：`io.github.zer0rin.yhviewer`。
 
-正式密钥和 GitHub Secrets 已配置，v0.2.0 签名 R8 包已完成 API 35 真机冒烟；v0.3.0 需要重新验收；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。推送版本 tag 才会触发发布工作流。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
+正式密钥和 GitHub Secrets 已配置，v0.2.0 签名 R8 包已完成 API 35 真机冒烟；v0.3.0 需要重新验收；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。手动运行 Release 工作流只构建正式签名候选包；推送版本 tag 才会创建公开 Release。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
 
 ## 一次性准备
 
@@ -89,7 +89,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-仅 `v*` tag push 触发 release workflow；普通 main push 不会发布。顺序：单元测试 → tag/版本检查 → 检查 Secrets → 签名并优化构建 → 校验最终 APK → API 34 模拟器冷启动 R8 包并检查书架渲染 → 创建 GitHub Release。附带 `yhviewer-v0.3.0-strict.apk`、`yhviewer-v0.3.0-standard.apk` 和 `SHA256SUMS.txt`。本地 APK 校验与 CI 使用同一个脚本。另有 `scripts/smoke-release.py APK` 可在专用测试设备验证 R8 冷启动；它不卸载旧包，签名冲突时直接失败，不替代真机完整冒烟。
+Release 支持手动候选构建与 `v*` tag push；手动运行只上传 APK 和 SHA256 artifact，普通 main push 不会发布。顺序：单元测试 → tag/版本检查 → 检查 Secrets → 签名并优化构建 → 校验最终 APK → API 34 模拟器冷启动 R8 包并检查书架渲染 → 创建 GitHub Release。附带 `yhviewer-v0.3.0-strict.apk`、`yhviewer-v0.3.0-standard.apk` 和 `SHA256SUMS.txt`。本地 APK 校验与 CI 使用同一个脚本。另有 `scripts/smoke-release.py APK` 可在专用测试设备验证 R8 冷启动；它不卸载旧包，签名冲突时直接失败，不替代真机完整冒烟。
 
 下载后可在 macOS 用 `shasum -a 256`、Linux 用 `sha256sum -c SHA256SUMS.txt` 核对。校验和用于验证文件完整性；更新身份由 APK 签名保证。
 
@@ -103,3 +103,20 @@ git push origin v0.3.0
 ## v0.3.0 双版本验收
 
 Strict / Standard 使用同一 applicationId 和正式签名，可覆盖安装并保留书架。先在专用模拟器验证两种方向的覆盖安装；真机只用新建的测试文档。验收 TXT/EPUB 沉浸阅读、翻页和排版；HTML 默认沙箱 9/9；每份文档存储隔离与撤权；权限预设及 iframe 警告。信任不含 iframe 和主动联网，两项必须单独打开。未经本版本真机验收，不要将历史真机记录作为发布依据。
+
+
+## v0.3.0 编辑器 / Python 发布候选
+
+合并并通过普通 CI 后，使用 `gh workflow run release.yml --ref main` 生成候选包。
+这个手动入口使用同一组 GitHub Secrets、R8、最终 APK 校验和 API 34 启动检查，
+只上传 `signed-candidate-v0.3.0-<commit>` artifact，不创建 tag 或公开 Release。
+下载并核对 SHA256 后，先验收候选包，再推送版本 tag。
+
+- [ ] CodeMirror 编辑、中文输入法和符号栏正常；保存只改书架副本，另存为生成新文件
+- [ ] 未保存修改离开有确认；编辑时旋转屏幕和外部打开文档不会静默丢失草稿
+- [ ] Standard 真实 Python 标准库、报错行号、超时和断网运行通过；Strict 没有 Python 入口和资源
+- [ ] 两个 APK 的 Python 文件边界、上游 SHA256 / 许可证以及 INTERNET 权限检查通过
+- [ ] 用户亲自用正式签名 Standard 候选包覆盖安装，确认原来的 8 条书架记录和阅读进度仍在
+
+自动化真机验收使用独立 QA applicationId 和本轮新建测试文档；不得读取或修改手机原有文档，
+也不读取正式应用的私有数据库。最后一项由用户检查，未确认前不打 tag。

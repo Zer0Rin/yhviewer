@@ -1,7 +1,7 @@
 package com.example.yhviewer
 
 /**
- * JavaScript 执行沙箱（"运行"按钮）。和"阅读沙箱"分开：阅读时代码永远不执行，只有用户主动点运行，
+ * JavaScript / Python 执行沙箱（"运行"按钮）。阅读时代码永远不执行，只有用户主动点运行，
  * 才在一个新建的 WebView 里、由 Web Worker 执行。
  *
  * 隔离来自四处：
@@ -20,28 +20,41 @@ object CodeRunner {
     const val MAX_LINES = 1_000
     const val MAX_CHARS = 200_000
 
-    val CSP = listOf(
+    enum class Lang(val id: String) { JAVASCRIPT("javascript"), PYTHON("python") }
+
+    private fun csp(connect: String, wasm: Boolean) = listOf(
         "default-src 'none'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:", // 'unsafe-eval'：兼容用 eval / new Function 的代码；反正不能联网
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' ${if (wasm) "'wasm-unsafe-eval' " else ""}blob:",
         "worker-src blob:",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
         "font-src 'self' data:",
-        "connect-src 'none'",
+        "connect-src $connect",
         "frame-src 'none'",
         "form-action 'none'",
         "base-uri 'none'",
         "object-src 'none'",
     ).joinToString("; ")
 
-    /** 目前只支持 JavaScript。TypeScript 需要先转译，Python 需要 Pyodide，见路线图 */
+    /** Compatibility policy for existing JavaScript callers. */
+    val CSP = cspFor(Lang.JAVASCRIPT)
+
+    fun cspFor(lang: Lang): String = csp(if (lang == Lang.PYTHON) "'self'" else "'none'", lang == Lang.PYTHON)
+
+    fun runnableLang(lang: String?, pythonAvailable: Boolean): Lang? = when (lang) {
+        "javascript" -> Lang.JAVASCRIPT
+        "python" -> if (pythonAvailable) Lang.PYTHON else null
+        else -> null
+    }
+
+    /** Compatibility API; flavor-aware callers use runnableLang. */
     fun isRunnable(lang: String?): Boolean = lang == "javascript"
 
-    fun render(code: String, template: String, theme: ReaderTheme, timeoutMs: Int = DEFAULT_TIMEOUT_MS): String {
+    fun render(code: String, template: String, theme: ReaderTheme, timeoutMs: Int = DEFAULT_TIMEOUT_MS, lang: Lang = Lang.JAVASCRIPT): String {
         require(PAYLOAD_PLACEHOLDER in template) { "template is missing $PAYLOAD_PLACEHOLDER" }
         val j = MarkdownRenderer::toJsonString
         val timeout = timeoutMs.coerceIn(500, LONG_TIMEOUT_MS)
-        val payload = """{"code":${j(code)},"timeoutMs":$timeout,"maxLines":$MAX_LINES,"maxChars":$MAX_CHARS}"""
+        val payload = """{"lang":${j(lang.id)},"code":${j(code)},"timeoutMs":$timeout,"maxLines":$MAX_LINES,"maxChars":$MAX_CHARS}"""
         return template
             .replace(MarkdownRenderer.THEME_PLACEHOLDER, theme.id)
             .replace(PAYLOAD_PLACEHOLDER, payload)
