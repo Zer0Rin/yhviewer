@@ -96,6 +96,8 @@ Chapter files are served through `WebViewAssetLoader.InternalStoragePathHandler`
 
 ## JavaScript execution
 
+<img src="docs/screenshots/js-runner.png" alt="JavaScript runner console" width="320">
+
 JavaScript code stays inert in the reader. **Run** opens a separate, ephemeral WebView and executes a source snapshot in a Web Worker. The runner always uses a fixed CSP and the Standard preset, regardless of the document’s grants or app edition. It exposes no native bridge, disables network connections and external script imports, and retains no storage between runs.
 
 The parent terminates the Worker after 5 seconds (optionally 30), at 1,000 output entries or 200,000 characters. Clearing the console does not reset these budgets. Stop, restart, document replacement and closing the panel dispose the execution view. Renderer failure shows an error and permits a fresh run.
@@ -139,7 +141,7 @@ flowchart TB
 
 ## Testing
 
-The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. Reports and debug APKs are retained as CI artifacts for 14 days.
+The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. The JS runner additionally passed focused Strict/Standard checks on API 35 using a separate QA app and generated documents. Reports and debug APKs are retained as CI artifacts for 14 days.
 
 | Area | Type | Covers |
 |---|---|---|

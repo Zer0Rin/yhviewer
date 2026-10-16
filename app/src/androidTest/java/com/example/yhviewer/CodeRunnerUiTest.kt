@@ -19,6 +19,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion=29)
@@ -108,11 +109,29 @@ class CodeRunnerUiTest : PermissionWebViewFixture() {
         open("const a=[];while(true)a.push(new Array(1e7).fill(1));")
         val pid=Process.myPid()
         compose.onNodeWithText("▶ 运行").performClick()
+        val terminal = AtomicReference<String?>(null)
+        var queryPending = false // Accessed only on the UI thread.
         compose.waitUntil(20_000) {
-            compose.onAllNodesWithText(RUNNER_CRASH_MESSAGE).fetchSemanticsNodes().isNotEmpty() ||
-                runnerOrNull()?.let { value(it,"window.__runResult && ['error','timeout'].includes(window.__runResult.state)")=="true" }==true
+            if (compose.onAllNodesWithText(RUNNER_CRASH_MESSAGE).fetchSemanticsNodes().isNotEmpty()) {
+                terminal.set("renderer-crash")
+            } else {
+                val view = runnerOrNull()
+                compose.runOnUiThread {
+                    // A renderer can die after submitting this query and drop its callback.
+                    // Never block the native crash-state check waiting for that renderer.
+                    if (view != null && view.parent != null && !queryPending) {
+                        queryPending = true
+                        view.evaluateJavascript("window.__runResult && window.__runResult.state") { state ->
+                            if (state == "\"error\"" || state == "\"timeout\"") terminal.set(state)
+                            queryPending = false
+                        }
+                    }
+                }
+            }
+            terminal.get() != null
         }
         assertEquals(pid,Process.myPid())
+        android.util.Log.i("RunnerTest", "Allocation bomb: ${terminal.get()}; app PID unchanged")
         compose.onNodeWithText("关闭").performClick()
     }
 }
