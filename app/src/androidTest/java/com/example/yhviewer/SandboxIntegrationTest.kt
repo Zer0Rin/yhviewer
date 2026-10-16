@@ -36,6 +36,7 @@ class SandboxIntegrationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private var generation = 0
+    private var documentUrl = ""
 
     private fun web(view: View): WebView? {
         if (view is WebView) return view
@@ -46,7 +47,15 @@ class SandboxIntegrationTest {
     private fun load(html: String) {
         val id = ++generation
         compose.runOnUiThread { compose.activity.setContent { key(id) { YHViewerTheme { HtmlView(PageSource.Html(html), Modifier.fillMaxSize()) } } } }
-        compose.waitUntil(20_000) { js("document.readyState") == "\"complete\"" && js("location.href") == "\"${Sandbox.DOC_URL}\"" }
+        compose.waitUntil(20_000) {
+            var ready = false
+            compose.runOnUiThread { val w=web(compose.activity.window.decorView)
+                val url=w?.url
+                ready=w?.progress==100 && url != null && android.net.Uri.parse(url).path=="/doc/index.html"
+                if (ready) documentUrl=url!!
+            }
+            ready && js("document.readyState") == "\"complete\""
+        }
     }
 
     private fun js(expression: String): String {
@@ -62,7 +71,7 @@ class SandboxIntegrationTest {
     }
 
     @Test fun nineChecksReopenStorageAndAutomaticRedirect() {
-        val expectInternet = InstrumentationRegistry.getArguments().getString("expectInternet") == "true"
+        val expectInternet = BuildConfig.NETWORK_CAPABLE
         assertEquals("The tested APK must match the permission round", expectInternet,
             compose.activity.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED)
         if (expectInternet) {
@@ -83,7 +92,7 @@ class SandboxIntegrationTest {
             assertEquals(result.toString(), 9, result.getJSONArray("results").length())
             assertEquals(result.toString(), 0, result.getInt("failed"))
             compose.waitUntil(15_000) { js("document.getElementById('redirect').className") == "\"PASS\"" }
-            assertEquals("\"${Sandbox.DOC_URL}\"", js("location.href"))
+            assertEquals("\"${documentUrl}\"", js("location.href"))
             assertEquals("true", js("localStorage.getItem('sandbox-test-mark') !== null"))
             compose.runOnUiThread {
                 val settings = web(compose.activity.window.decorView)!!.settings
@@ -135,10 +144,10 @@ class SandboxIntegrationTest {
             compose.waitUntil(10_000) { js("window.attempted === true") == "true" }
             compose.waitForIdle()
             assertEquals("Automatic navigation must not launch another app", 0, monitor.hits)
-            assertEquals("\"${Sandbox.DOC_URL}\"", js("location.href"))
+            assertEquals("\"${documentUrl}\"", js("location.href"))
             onView(isAssignableFrom(WebView::class.java)).perform(click())
             compose.waitUntil(10_000) { monitor.hits == 1 }
-            assertEquals("\"${Sandbox.DOC_URL}\"", js("location.href"))
+            assertEquals("\"${documentUrl}\"", js("location.href"))
         } finally { instrumentation.removeMonitor(monitor) }
     }
 }

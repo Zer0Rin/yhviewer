@@ -43,11 +43,12 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ShelfRepository(app, AppDatabase.get(app))
     private val themeStore = ThemeStore(app)
+    private val readingStore = ReadingPrefsStore(app)
     private val prefs = app.getSharedPreferences("reader_prefs", Context.MODE_PRIVATE)
 
     /** 启动时先清理孤儿文件；导入要等它做完，避免误删正在写入的新副本 */
     private val startup = viewModelScope.async {
-        try { repo.cleanOrphans(); null }
+        try { repo.cleanOrphans(); DocProfiles.cleanup(app, repo.idsWithPersistentStorage()); null }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { e }
     }
@@ -57,6 +58,14 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var wrap by mutableStateOf(prefs.getBoolean(KEY_WRAP, false))
         private set
+
+    var reading by mutableStateOf(readingStore.load())
+        private set
+
+    fun updateReading(value: ReadingPrefs) {
+        reading = value.normalized()
+        readingStore.save(reading)
+    }
 
     fun selectTheme(t: ReaderTheme) { theme = t; themeStore.save(t) }
     fun toggleWrap() { wrap = !wrap; prefs.edit().putBoolean(KEY_WRAP, wrap).apply() }
@@ -76,7 +85,25 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     fun updateQuery(q: String) { query = q }
     fun toggleFavoritesOnly() { favoritesOnly = !favoritesOnly }
     fun toggleFavorite(book: Book) { viewModelScope.launch { repo.setFavorite(book.id, !book.favorite) } }
-    fun delete(book: Book) { viewModelScope.launch { repo.delete(book.id) } }
+    fun delete(book: Book) { viewModelScope.launch {
+        DocProfiles.revoke(getApplication(), book.id)
+        repo.delete(book.id)
+    } }
+
+    fun setPermissions(bookId: Long, permissions: DocPermissions) {
+        viewModelScope.launch {
+            val bounded = AppCapabilities.effective(permissions)
+            // Invalidate storage before suspension so quick regrant cannot reuse a revoked profile.
+            if (!bounded.persistentStorage || !bounded.scripts) DocProfiles.revoke(getApplication(), bookId)
+            repo.setPermissions(bookId, bounded)
+            val cur = current()
+            if (cur is OpenedDoc.Single && cur.bookId == bookId) {
+                flushPosition()
+                documentSession++ // stale callbacks from the previous permissions cannot overwrite position
+                reader = ReaderState.Ready(cur.copy(permissions = bounded))
+            }
+        }
+    }
 
     // ---------------- 导航 + 阅读 ----------------
     var screen by mutableStateOf<Screen>(Screen.Shelf)
@@ -97,6 +124,12 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private var ratio = 0f
     private var loadJob: Job? = null
     private var saveJob: Job? = null
+
+    fun onRendererGone(forSession: Int, forChapter: Int) {
+        if (forSession != documentSession || forChapter != chapter || current() == null) return
+        flushPosition()
+        reader = ReaderState.Error(RENDERER_GONE_MESSAGE)
+    }
 
     fun initialRatio(): Float = ratio
 
@@ -151,17 +184,18 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         PositionWrites.enqueue(repo, doc.bookId, locator, doc.chapterCount)
     }
 
-    fun goToChapter(index: Int, anchor: String? = null) {
+    fun goToChapter(index: Int, anchor: String? = null, atEnd: Boolean = false) {
         val doc = current() ?: return
         if (index !in 0 until doc.chapterCount || index == chapter) return
         chapterAnchor = anchor
         chapter = index
-        ratio = 0f
+        ratio = if (atEnd) 1f else 0f
         flushPosition()
     }
 
     fun nextChapter() = goToChapter(chapter + 1)
     fun prevChapter() = goToChapter(chapter - 1)
+    fun prevChapterFromStart() = goToChapter(chapter - 1, atEnd = true)
 
     /** EPUB 内部链接：指向另一章就切过去；同一章（页内锚点）或不在目录里的文件交给 WebView */
     fun onBookLink(path: String, fragment: String?): Boolean {

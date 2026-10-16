@@ -25,6 +25,7 @@ sealed interface OpenedDoc {
         override val name: String,
         override val locator: Locator,
         val doc: LoadedDoc,
+        val permissions: DocPermissions = DocPermissions.STANDARD,
     ) : OpenedDoc {
         override val chapterCount get() = 1
     }
@@ -159,7 +160,7 @@ class ShelfRepository(
                 DocType.EPUB -> OpenedDoc.Epub(book.id, book.name, locator, local, EpubParser.parse(local).chapters)
                 DocType.TXT -> OpenedDoc.Txt(book.id, book.name, locator, TxtChapters.split(local.readText(Charsets.UTF_8)))
                 else -> OpenedDoc.Single(
-                    book.id, book.name, locator, LoadedDoc(book.name, book.type, local.readText(Charsets.UTF_8))
+                    book.id, book.name, locator, LoadedDoc(book.name, book.type, local.readText(Charsets.UTF_8)), DocPermissions.fromBits(book.permissions)
                 )
             }
         }
@@ -170,6 +171,10 @@ class ShelfRepository(
     suspend fun savePosition(id: Long, locator: Locator, chapterCount: Int) {
         dao.updatePosition(id, locator.encode(), locator.overallProgress(chapterCount))
     }
+
+    suspend fun setPermissions(id: Long, permissions: DocPermissions) = dao.setPermissions(id, permissions.toBits())
+
+    suspend fun idsWithPersistentStorage(): Set<Long> = dao.idsWithPersistentStorage().toSet()
 
     suspend fun setFavorite(id: Long, favorite: Boolean) = dao.setFavorite(id, favorite)
 

@@ -90,10 +90,22 @@ class ReaderThemeIntegrationTest {
         assertTrue("JS callback timeout", latch.await(5, TimeUnit.SECONDS))
         return result
     }
-    private fun waitJs(scenario: ActivityScenario<MainActivity>, expression: String, expected: String = "true") =
-        compose.waitUntil(25_000) { js(scenario, expression) == expected }
-    private fun ready(scenario: ActivityScenario<MainActivity>) = waitJs(scenario,
-        "document.readyState==='complete' && !!document.querySelector('#content h1')")
+    private fun waitJs(scenario: ActivityScenario<MainActivity>, expression: String, expected: String = "true") {
+        try { compose.waitUntil(25_000) { js(scenario, expression) == expected } }
+        catch (e: Throwable) {
+            android.util.Log.e("ReaderPositionTest", "expr=$expression DOM=" + js(scenario, "JSON.stringify({before:window.__beforeRatio,y:scrollY,h:innerHeight,total:document.documentElement.scrollHeight,theme:document.documentElement.dataset.theme})"))
+            scenario.onActivity { a -> val w=web(a.window.decorView);android.util.Log.e("ReaderPositionTest", "native=${w?.scrollRatio()} vm=${androidx.lifecycle.ViewModelProvider(a)[ShelfViewModel::class.java].initialRatio()}") }
+            throw e
+        }
+    }
+    private fun ready(scenario: ActivityScenario<MainActivity>) {
+        compose.waitUntil(25_000) {
+            var ready=false
+            scenario.onActivity { ready=web(it.window.decorView)?.progress==100 }
+            ready
+        }
+        waitJs(scenario, "document.readyState==='complete' && !!document.querySelector('#content h1')")
+    }
     private fun changeNight(scenario: ActivityScenario<MainActivity>, mode: String) {
         var previous: MainActivity? = null
         scenario.onActivity { previous = it }
@@ -201,12 +213,38 @@ class ReaderThemeIntegrationTest {
     @Test fun htmlHasNoThemeMenuAndItsOwnSetThemeIsNeverCalled() {
         assertTrue(prefs.edit().putString("md_theme", "ink").commit())
         val html = "<h1>Original HTML</h1><script>window.themeCalls=0;window.setTheme=()=>window.themeCalls++</script>"
+        val savedTrusted = AppCapabilities.effective(DocPermissions.TRUSTED)
         launch(document("theme-original.html", html, true), true).use { scenario ->
             waitJs(scenario, "document.readyState==='complete' && typeof window.setTheme==='function'")
             compose.onNodeWithText("Aa").assertDoesNotExist()
             assertEquals("0", js(scenario, "window.themeCalls"))
             assertEquals("\"Original HTML\"", js(scenario, "document.querySelector('h1').textContent"))
             assertEquals("null", js(scenario, "document.documentElement.getAttribute('data-theme')"))
+            compose.onNodeWithText("权限").performClick()
+            compose.onNodeWithText("信任").performClick()
+            compose.waitUntil(10_000) {
+                var changed=false
+                scenario.onActivity { a ->
+                    val doc=(androidx.lifecycle.ViewModelProvider(a)[ShelfViewModel::class.java].reader as? ReaderState.Ready)?.doc as? OpenedDoc.Single
+                    changed=doc?.permissions==savedTrusted
+                }
+                changed
+            }
+            androidx.test.espresso.Espresso.pressBack()
+            compose.onNodeWithText("已放宽").assertIsDisplayed()
+            scenario.recreate()
+            waitJs(scenario, "document.readyState==='complete' && typeof window.setTheme==='function'")
+            scenario.onActivity { a ->
+                val doc=(androidx.lifecycle.ViewModelProvider(a)[ShelfViewModel::class.java].reader as ReaderState.Ready).doc as OpenedDoc.Single
+                assertEquals(savedTrusted,doc.permissions)
+                assertFalse(doc.permissions.frames || doc.permissions.network)
+                val stored=runBlocking { AppDatabase.get(context).bookDao().get(doc.bookId)!! }
+                assertEquals(savedTrusted.toBits(),stored.permissions)
+                if (!AppCapabilities.networkCapable) {
+                    assertFalse(DocPermissions.fromBits(stored.permissions).effective(networkCapable = true).needsNetwork)
+                }
+            }
+            assertEquals("0", js(scenario, "window.themeCalls"))
         }
     }
     @Test fun initialThemeWaitsForPageAndInvalidNativeValuesAreRejected() {

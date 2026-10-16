@@ -6,39 +6,51 @@
   <title>Chapter</title>
   <link rel="stylesheet" href="/assets/shared/themes.css">
   <style>
+    /* 排版变量的默认值；实际值由 #reading 里的 :root 规则覆盖（来自 ReadingPrefs.toCss） */
+    :where(:root) { --read-scale: 1; --read-line: 1.9; --read-margin: 20px; --read-font: var(--font-body); }
     body {
-      margin: 0 auto; max-width: 720px; padding: 20px 20px 64px;
+      margin: 0 auto; max-width: 720px;
+      padding: 24px var(--read-margin) 48px;
       color: var(--fg); background: var(--bg);
-      font: 18px/1.9 var(--font-body); -webkit-text-size-adjust: 100%;
+      font-family: var(--read-font);
+      font-size: calc(18px * var(--read-scale));
+      line-height: var(--read-line);
+      -webkit-text-size-adjust: 100%;
       word-wrap: break-word; text-align: justify;
     }
     h1 { font-size: 1.25em; line-height: 1.4; color: var(--heading); margin: .4em 0 1.4em; text-align: left; }
     p { margin: 0 0 .9em; text-indent: 2em; }
     .end { margin-top: 3em; text-align: center; color: var(--muted); font-size: .8em; text-indent: 0; }
-    [data-theme="terminal"] body { font-size: 15px; line-height: 1.75; text-align: left; }
+    [data-theme="terminal"] body { font-size: calc(15px * var(--read-scale)); text-align: left; }
   </style>
+  <style id="reading"></style>
 </head>
 <body>
   <h1 id="title"></h1>
   <main id="content"></main>
 
-  <!-- Kotlin 替换成 JSON：{"title": "...", "text": "...", "position": "3 / 120"} -->
+  <!-- Kotlin 替换成 JSON：{"title": "...", "text": "...", "position": "3 / 120", "reading": ":root{...}"} -->
   <script type="application/json" id="payload">/*PAYLOAD*/</script>
   <script>
     window.setTheme = function (t) {
       if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) document.documentElement.setAttribute('data-theme', t);
     };
+    // 字号、行距等实时调整：只替换一条 CSS 变量规则，不重新渲染正文
+    window.setReading = function (css) {
+      document.getElementById('reading').textContent = css;
+    };
     (function () {
       var p = JSON.parse(document.getElementById('payload').textContent);
+      if (p.reading) window.setReading(p.reading);
       document.getElementById('title').textContent = p.title;
       document.title = p.title;
       var out = document.getElementById('content');
       var frag = document.createDocumentFragment();
       p.text.split(/\r?\n/).forEach(function (line) {
-        var s = line.replace(/^[\s　]+|[\s　]+$/g, '');   // 去掉全角空格缩进，统一用 text-indent
+        var s = line.replace(/^[\s　]+|[\s　]+$/g, '');
         if (!s) return;
         var el = document.createElement('p');
-        el.textContent = s;                                      // textContent：原文里的 <script> 只是文字
+        el.textContent = s;
         frag.appendChild(el);
       });
       out.appendChild(frag);

@@ -25,10 +25,23 @@ android {
         applicationId = "io.github.zer0rin.yhviewer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    flavorDimensions += "network"
+    productFlavors {
+        create("strict") {
+            dimension = "network"
+            buildConfigField("boolean", "NETWORK_CAPABLE", "false")
+        }
+        create("standard") {
+            dimension = "network"
+            isDefault = true
+            buildConfigField("boolean", "NETWORK_CAPABLE", "true")
+        }
     }
 
     signingConfigs {
@@ -59,6 +72,7 @@ android {
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

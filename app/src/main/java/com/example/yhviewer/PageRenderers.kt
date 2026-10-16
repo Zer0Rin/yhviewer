@@ -36,10 +36,10 @@ object CodeRenderer {
 }
 
 object TxtRenderer {
-    fun render(chapter: TxtChapter, index: Int, count: Int, template: String, theme: ReaderTheme): String {
+    fun render(chapter: TxtChapter, index: Int, count: Int, template: String, theme: ReaderTheme, reading: ReadingPrefs = ReadingPrefs()): String {
         require(PAYLOAD_PLACEHOLDER in template) { "template is missing $PAYLOAD_PLACEHOLDER" }
         val j = MarkdownRenderer::toJsonString
-        val payload = """{"title":${j(chapter.title)},"text":${j(chapter.text)},"position":${j("${index + 1} / $count")}}"""
+        val payload = """{"reading":${j(reading.toCss())},"title":${j(chapter.title)},"text":${j(chapter.text)},"position":${j("${index + 1} / $count")}}"""
         return template
             .replace(MarkdownRenderer.THEME_PLACEHOLDER, theme.id)
             .replace(PAYLOAD_PLACEHOLDER, payload)

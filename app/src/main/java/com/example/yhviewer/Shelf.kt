@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
  * EPUB 解压成 filesDir/shelf/<localFile>/ 目录。
  *
  * v2 新增：locator（阅读位置，见 Locator）、progress（全书进度 0..1，书架显示用）。
+ * v3 新增：permissions（每份文档自己的权限，见 DocPermissions）。
  * 新增枚举值 CODE / TXT / EPUB 不需要迁移：type 按名字存成 TEXT。
  */
 @Entity(
@@ -43,6 +44,8 @@ data class Book(
     val locator: String? = null,
     // defaultValue 必须和迁移里的 DEFAULT 0 一致，否则 Room 校验表结构时会报"迁移不正确"
     @ColumnInfo(defaultValue = "0") val progress: Float = 0f,
+    // v3：这份文档的权限（DocPermissions 位标记）。默认 1 = "标准"档，老文档升级后行为不变
+    @ColumnInfo(defaultValue = "1") val permissions: Int = DocPermissions.STANDARD.toBits(),
 )
 
 @Dao
@@ -65,6 +68,10 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE sourceUri = :uri")
     suspend fun findBySource(uri: String): Book?
 
+    /** 授权了"保留本地数据"的文档；启动时据此清理多余的 WebView Profile */
+    @Query("SELECT id FROM books WHERE (permissions & 2) != 0")
+    suspend fun idsWithPersistentStorage(): List<Long>
+
     @Query("SELECT localFile FROM books")
     suspend fun allLocalFiles(): List<String>
 
@@ -83,6 +90,9 @@ interface BookDao {
     @Query("UPDATE books SET locator = :locator, progress = :progress WHERE id = :id")
     suspend fun updatePosition(id: Long, locator: String, progress: Float)
 
+    @Query("UPDATE books SET permissions = :bits WHERE id = :id")
+    suspend fun setPermissions(id: Long, bits: Int)
+
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: Long)
 }
@@ -95,7 +105,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [Book::class], version = 2, exportSchema = true)
+/** v2 → v3：加权限列。DEFAULT 1 = 标准档，和升级前的行为完全一致 */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE books ADD COLUMN permissions INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
+@Database(entities = [Book::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
 
@@ -106,7 +123,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "shelf.db")
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

@@ -49,15 +49,19 @@ class V2ReaderIntegrationTest {
     private val dao get() = AppDatabase.get(context).bookDao()
     private val created = mutableListOf<Uri>()
     private val prefs get() = context.getSharedPreferences("reader_prefs", 0)
+    private var oldReading = ReadingPrefs()
     private var oldTheme: String? = null
     private var oldWrap: Boolean? = null
 
     @Before fun prepare() {
+        oldReading = ReadingPrefsStore(context).load()
+        ReadingPrefsStore(context).save(ReadingPrefs())
         oldTheme = prefs.getString("md_theme", null)
         oldWrap = if (prefs.contains("code_wrap")) prefs.getBoolean("code_wrap", false) else null
         assertTrue(prefs.edit().putString("md_theme", "paper").putBoolean("code_wrap", false).commit())
     }
     @After fun clean() {
+        ReadingPrefsStore(context).save(oldReading)
         runBlocking {
             val repo = ShelfRepository(context, AppDatabase.get(context))
             created.forEach { uri ->
@@ -101,7 +105,13 @@ class V2ReaderIntegrationTest {
     private fun waitText(text: String) = compose.waitUntil(25_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
-        compose.onNode(hasText(label, substring = true)).performClick()
+        // Book chips scroll horizontally on narrow screens; an offscreen coordinate click
+        // can hit the sheet scrim instead. Code retains its ordinary dropdown.
+        val bookSheet = compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()
+        val option = compose.onNode(hasText(label, substring = true))
+        if (bookSheet) option.performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
+        else option.performClick()
+        if (bookSheet) androidx.test.espresso.Espresso.pressBack()
     }
     private fun nativeRatio(s: ActivityScenario<MainActivity>): Float {
         var result = -1f
@@ -119,12 +129,16 @@ class V2ReaderIntegrationTest {
             } }
             ready
         }
-        s.onActivity { a -> web(a.window.decorView)!!.let { w ->
-            @Suppress("DEPRECATION") val range = (w.contentHeight * w.scale).roundToInt() - w.height
-            assertTrue("Fixture must scroll", range > 0)
-            w.scrollTo(0, (range * ratio).roundToInt())
-        } }
-        waitRatio(s, ratio)
+        // Scroll after initialization has acknowledged the position, before backgrounding.
+        compose.waitUntil(10_000) {
+            var reported = false
+            s.onActivity { a -> web(a.window.decorView)!!.let { w ->
+                @Suppress("DEPRECATION") val range = (w.contentHeight * w.scale).roundToInt() - w.height
+                w.scrollTo(0, (range * ratio).roundToInt())
+                reported = abs(ViewModelProvider(a)[ShelfViewModel::class.java].initialRatio() - ratio) < .025f
+            } }
+            reported
+        }
     }
     private fun longText(label: String) = (1..100).joinToString("\n") { "$label 第 $it 段。阅读位置应在换主题、旋转和重开后保留。" }
 
@@ -135,7 +149,8 @@ class V2ReaderIntegrationTest {
             waitText("v2-demo.kt")
             waitJs(s, "document.querySelectorAll('.l').length===7 && document.getElementById('meta').textContent.includes('Kotlin')")
             assertEquals("true", js(s, "!!document.querySelector('.hljs-keyword') && !!document.querySelector('.hljs-comment') && [...document.querySelectorAll('.n')].every(n=>n.textContent==='')"))
-            assertEquals("Unwrapped long code must scroll horizontally", "true", js(s, "document.getElementById('code').scrollWidth>document.getElementById('code').clientWidth"))
+            // DOM construction can precede the viewport/layout update on a cold WebView.
+            waitJs(s, "document.getElementById('code').scrollWidth>document.getElementById('code').clientWidth")
             js(s, "window.__gutterLeft=document.querySelector('.n').getBoundingClientRect().left;document.getElementById('code').scrollLeft=120")
             waitJs(s, "document.getElementById('code').scrollLeft>=100 && Math.abs(document.querySelector('.n').getBoundingClientRect().left-window.__gutterLeft)<1")
             js(s, "document.getElementById('code').scrollLeft=0")
@@ -227,7 +242,7 @@ class V2ReaderIntegrationTest {
     }.toByteArray()
     private fun epub(): ByteArray {
         val image = ByteArrayOutputStream().also { out -> Bitmap.createBitmap(80, 40, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(30, 160, 120));compress(Bitmap.CompressFormat.PNG, 100, out);recycle() } }.toByteArray()
-        val chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title><style>body {color:black;background:white}</style></head><body><h1>Safe chapter</h1><img src="image.png"/><script>document.body.textContent='SCRIPT RAN'</script><p>${longText("EPUB")}</p><h2 id="target">Target</h2>LINK</body></html>"""
+        val chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title><style>body {color:black;background:white} p {font-size:12px}</style></head><body><h1>Safe chapter</h1><img src="image.png"/><script>document.body.textContent='SCRIPT RAN'</script><p>${longText("EPUB")}</p><h2 id="target">Target</h2>LINK</body></html>"""
         return zip(mapOf(
             "mimetype" to "application/epub+zip".toByteArray(),
             "META-INF/container.xml" to """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>""".toByteArray(),
@@ -242,7 +257,7 @@ class V2ReaderIntegrationTest {
         var result: Pair<Map<String,String>, ByteArray>? = null
         s.onActivity { a -> val w=web(a.window.decorView)!!
             val req=object:WebResourceRequest {
-                override fun getUrl()=Uri.parse(Sandbox.bookUrl(path))
+                override fun getUrl()=Uri.parse(Sandbox.bookUrl(path).replace(Sandbox.HOST, Uri.parse(w.url).host!!))
                 override fun isForMainFrame()=true
                 override fun isRedirect()=false
                 override fun hasGesture()=false
@@ -287,6 +302,20 @@ class V2ReaderIntegrationTest {
                 assertTrue(response(s,"two.xhtml").second.toString(Charsets.UTF_8).contains("data-theme=\"$id\""))
                 s.onActivity { a -> assertFalse(web(a.window.decorView)!!.settings.javaScriptEnabled) }
             }
+            var before: WebView? = null
+            var previousHeight = 0
+            s.onActivity { a -> before=web(a.window.decorView);previousHeight=before!!.contentHeight
+                ViewModelProvider(a)[ShelfViewModel::class.java].updateReading(ReadingPrefs(fontScale=150)) }
+            compose.waitUntil(20_000) {
+                var reflowed=false
+                s.onActivity { a -> val w=web(a.window.decorView)
+                    reflowed=w != null && w !== before && w.progress==100 && w.contentHeight>previousHeight*1.2f
+                }
+                reflowed
+            }
+            waitRatio(s,.4f)
+            assertTrue(response(s,"two.xhtml").second.toString(Charsets.UTF_8).contains("--read-scale:1.50"))
+            s.onActivity { a -> assertFalse(web(a.window.decorView)!!.settings.javaScriptEnabled) }
             compose.onNodeWithText("‹ 书架").performClick();waitText("书架")
             waitText("V2 EPUB Demo")
             compose.onNodeWithText("V2 EPUB Demo").assertIsDisplayed()
