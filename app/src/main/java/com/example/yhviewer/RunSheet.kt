@@ -1,5 +1,6 @@
 package com.example.yhviewer
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,10 @@ fun RunSheet(code: String, fileName: String, theme: ReaderTheme, onDismiss: () -
     var halted by remember(code, fileName) { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val outputHeight = (LocalConfiguration.current.screenHeightDp * 0.55f).coerceIn(160f,420f).dp
+    // Resolve AUTO outside the dialog: its themed WebView context can report dark in a light system.
+    val runnerTheme = if (theme == ReaderTheme.AUTO) {
+        if (isSystemInDarkTheme()) ReaderTheme.INK else ReaderTheme.PAPER
+    } else theme
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -62,12 +67,12 @@ fun RunSheet(code: String, fileName: String, theme: ReaderTheme, onDismiss: () -
                 } else {
                     key(runId, timeoutMs, code) {
                         val html = remember(code, timeoutMs) {
-                            CodeRunner.render(code, Templates.get(context, CodeRunner.TEMPLATE), theme, timeoutMs)
+                            CodeRunner.render(code, Templates.get(context, CodeRunner.TEMPLATE), runnerTheme, timeoutMs)
                         }
                         HtmlView(
                             source = PageSource.Html(html, csp = CodeRunner.CSP),
                             modifier = Modifier.fillMaxSize(),
-                            theme = theme,
+                            theme = runnerTheme,
                             permissions = DocPermissions.STANDARD,
                             onRendererGone = { halted = RUNNER_CRASH_MESSAGE },
                         )

@@ -1,10 +1,15 @@
 package com.example.yhviewer
 
 import android.content.ContentValues
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Process
 import android.provider.MediaStore
 import android.webkit.WebView
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.*
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.espresso.Espresso.onView
@@ -63,6 +68,50 @@ class CodeRunnerUiTest : PermissionWebViewFixture() {
             val dao=AppDatabase.get(context).bookDao();val repo=ShelfRepository(context,AppDatabase.get(context))
             created.forEach { uri -> dao.findBySource(uri.toString())?.let { repo.delete(it.id) };context.contentResolver.delete(uri,null,null) }
         }
+    }
+
+    @Test fun autoThemeFollowsCompositionConfigurationWithoutRestartingRunner() {
+        val configuration = mutableStateOf(Configuration(compose.activity.resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or Configuration.UI_MODE_NIGHT_NO
+        })
+        val theme = mutableStateOf(ReaderTheme.AUTO)
+        compose.runOnUiThread {
+            compose.activity.setContent {
+                CompositionLocalProvider(LocalConfiguration provides configuration.value) {
+                    RunSheet("console.log('theme fixture finished')", "theme-fixture.js", theme.value) {}
+                }
+            }
+        }
+        compose.onNodeWithText("运行 theme-fixture.js").assertIsDisplayed()
+        val view = runner()
+        compose.waitUntil(15_000) { value(view, "window.__runResult && window.__runResult.state") == "\"done\"" }
+        assertEquals("AUTO must use the light composition configuration outside the dialog",
+            "\"rgb(250, 249, 245)\"", value(view, "getComputedStyle(document.body).backgroundColor"))
+        assertEquals("true", value(view, "!!(window.__themeRegressionMarker = { result: window.__runResult })"))
+
+        fun assertAppearance(expected: ReaderTheme, background: String) {
+            compose.waitUntil(5_000) { value(view, "getComputedStyle(document.body).backgroundColor") == "\"$background\"" }
+            assertEquals("\"${expected.id}\"", value(view, "document.documentElement.dataset.theme"))
+            assertSame("Theme changes must retain the WebView", view, runner())
+            assertEquals("Runner execution must survive theme changes without being restarted", "true",
+                value(view, "!!window.__themeRegressionMarker && window.__themeRegressionMarker.result === window.__runResult && window.__runResult.state === 'done'"))
+        }
+
+        compose.runOnUiThread {
+            configuration.value = Configuration(configuration.value).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or Configuration.UI_MODE_NIGHT_YES
+            }
+        }
+        assertAppearance(ReaderTheme.INK, "rgb(38, 38, 36)")
+        compose.runOnUiThread { theme.value = ReaderTheme.PAPER }
+        assertAppearance(ReaderTheme.PAPER, "rgb(250, 249, 245)")
+        compose.runOnUiThread { theme.value = ReaderTheme.INK }
+        assertAppearance(ReaderTheme.INK, "rgb(38, 38, 36)")
+        compose.runOnUiThread { theme.value = ReaderTheme.TERMINAL }
+        assertAppearance(ReaderTheme.TERMINAL, "rgb(29, 42, 50)")
+        compose.runOnUiThread { theme.value = ReaderTheme.AUTO }
+        assertAppearance(ReaderTheme.INK, "rgb(38, 38, 36)")
+        compose.onNodeWithText("关闭").performClick()
     }
 
     @Test fun buttonIsExplicitAndStopRestartCloseAndDocumentReplacementDisposeWorkers() {
