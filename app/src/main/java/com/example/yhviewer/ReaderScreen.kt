@@ -73,6 +73,8 @@ fun ReaderScreen(vm: ShelfViewModel) {
     }
 }
 
+private data class RunRequest(val code: String, val fileName: String)
+
 // ======================= 单页文档 =======================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +84,8 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     val type = doc?.doc?.type
     var menuOpen by remember { mutableStateOf(false) }
     var permissionsOpen by remember { mutableStateOf(false) }
+    // Retain the source across reader errors; renderer loss can affect both WebViews.
+    var runRequest by remember(vm.documentSession) { mutableStateOf<RunRequest?>(null) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -90,6 +94,9 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                 title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                 actions = {
+                    if (doc != null && type == DocType.CODE && CodeRunner.isRunnable(CodeLanguages.forFileName(doc.name))) {
+                        TextButton(onClick = { runRequest = RunRequest(doc.doc.text, doc.name) }) { Text("▶ 运行") }
+                    }
                     if (doc != null && type == DocType.HTML) {
                         if (AppCapabilities.effective(doc.permissions).isRelaxed) Text("已放宽", color = MaterialTheme.colorScheme.error)
                         TextButton(onClick = { permissionsOpen = true }) { Text("权限") }
@@ -124,6 +131,9 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
             is ReaderState.Error -> CenterText("打开失败：${state.message}", m)
             is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m)
         }
+    }
+    runRequest?.let { request ->
+        RunSheet(request.code, request.fileName, vm.theme, onDismiss = { runRequest = null })
     }
     if (permissionsOpen && doc != null && type == DocType.HTML) {
         PermissionSheet(doc.permissions, { vm.setPermissions(doc.bookId, it) }, { permissionsOpen = false })

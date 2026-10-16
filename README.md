@@ -34,6 +34,7 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 |---|---|
 | **HTML** | Rendered as-is in the sandbox. Per-document permissions; external links require a real tap by default |
 | **Markdown** | markdown-it + highlight.js, bundled offline. Raw HTML inside Markdown is shown as text |
+| **JavaScript execution** | Explicit Run button, isolated Worker console, 5-second timeout (optionally 30), stop/restart and bounded output; no network, DOM or device-file access |
 | **Code** | File-type detection, line numbers excluded from copied text, wrap toggle and bundled syntax highlighting. Compact JSON up to 500,000 characters is formatted; large files skip highlighting and render in 200-line chunks |
 | **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents |
 | **EPUB** | EPUB 2 and 3, title and TOC from nav / NCX, images and publisher CSS, book scripts never run |
@@ -93,6 +94,14 @@ Plus:
 
 Chapter files are served through `WebViewAssetLoader.InternalStoragePathHandler`, which adds its own traversal checks. The reader injects theme styles into each chapter while serving it, without modifying the files on disk.
 
+## JavaScript execution
+
+JavaScript code stays inert in the reader. **Run** opens a separate, ephemeral WebView and executes a source snapshot in a Web Worker. The runner always uses a fixed CSP and the Standard preset, regardless of the document’s grants or app edition. It exposes no native bridge, disables network connections and external script imports, and retains no storage between runs.
+
+The parent terminates the Worker after 5 seconds (optionally 30), at 1,000 output entries or 200,000 characters. Clearing the console does not reset these budgets. Stop, restart, document replacement and closing the panel dispose the execution view. Renderer failure shows an error and permits a fresh run.
+
+This is browser JavaScript: no Node.js APIs, TypeScript/JSX transpilation or module imports. Awaited work runs within the time limit; after top-level work finishes, the runner ends following a short quiet period, so it does not wait indefinitely for unawaited timers. A Worker shares the WebView renderer’s memory limit; a memory bomb can terminate that renderer, which the app handles without terminating its own process.
+
 ## Architecture
 
 ```mermaid
@@ -142,6 +151,8 @@ The suite includes JVM policy/template tests and native database, navigation, re
 | Migration | Instrumented (`MigrationTestHelper`) | v1 → v2 → v3 keeps existing rows, progress and default permissions, schema validated against the exported JSON |
 | Permissions | JVM + instrumented | All 128 bit combinations, presets excluding iframe/network, build capabilities, independent storage, live-profile revocation, real CSP parent/iframe boundary |
 | Reading settings | JVM + instrumented | Finite normalization, safe CSS, confirmed taps, stable viewport, previous chapter end and persisted controls |
+| JS execution | JVM + instrumented | Safe source embedding, syntax/runtime line mapping, real Worker CSP, Unicode line separators, timeout, console flood/forged messages, fresh storage, live themes, stop/restart/close and renderer loss |
+| Renderer recovery | Instrumented | Controlled renderer crash keeps the app alive, safe reopening, strict EPUB policy, UTF-16 response and profile thread guards |
 | App flows | Instrumented | Open-with, share, single-instance reuse, back-stack layering, size limits |
 
 ### Sandbox verification
@@ -161,7 +172,7 @@ CSP-blocked requests may never reach the interceptor, so Logcat alone is insuffi
 
 Standard edition now provides the permanent network-permission test round; it checks a native HTTPS positive control and the default 9/9 sandbox result. Relaxed permissions intentionally change those expected outcomes. See [v0.3 integration verification](docs/verification/V03_VERIFICATION.md).
 
-See [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
+See [JS runner verification](docs/verification/JS_RUNNER.md), [renderer recovery](docs/verification/RENDERER_RECOVERY.md), and [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
 
 ## Tech stack
 
@@ -184,6 +195,7 @@ cd yhviewer
 Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compressed EPUB at 100 MiB. Extracted EPUB limits are 3,000 entries, 50 MiB per entry and 200 MiB total; XML/chapter input is capped at 10 MiB each. EPUB XML/XHTML is decoded before validation and rendering, including BOM-marked UTF-16. DRM and publisher interactive features are unsupported. Big5 detection is heuristic, and scroll ratios preserve an approximate location rather than an exact paragraph.
 
 
+- [x] Explicit JavaScript execution sandbox
 - [x] Per-document permissions and Strict / Standard editions
 - [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
 - [ ] Statistical charset detection (e.g. ICU) to tell Big5 from GB18030 reliably

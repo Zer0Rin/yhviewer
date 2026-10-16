@@ -78,8 +78,8 @@ const val RENDERER_GONE_MESSAGE = "页面渲染进程已终止（可能是资源
 
 /** WebView 要显示的内容 */
 sealed interface PageSource {
-    /** 我们生成的整页 HTML，挂在 /doc/index.html */
-    data class Html(val html: String) : PageSource
+    /** Native-generated HTML at /doc/index.html. CSP overrides are only for trusted app templates. */
+    data class Html(val html: String, val csp: String? = null) : PageSource
 
     /** EPUB 解压目录里的一个章节文件，挂在 /book/<path> */
     data class BookFile(val rootDir: File, val path: String, val fragment: String? = null) : PageSource
@@ -330,7 +330,7 @@ fun HtmlView(
                     .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
                 val startUrl = when (source) {
                     is PageSource.Html -> {
-                        builder.addPathHandler("/doc/", DocumentPathHandler(source.html, CspPolicy.build(effective)))
+                        builder.addPathHandler("/doc/", DocumentPathHandler(source.html, source.csp ?: CspPolicy.build(effective)))
                         "https://$localHost/doc/index.html"
                     }
                     is PageSource.BookFile -> {
