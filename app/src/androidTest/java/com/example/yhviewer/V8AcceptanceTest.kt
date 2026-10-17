@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
@@ -292,18 +294,72 @@ class V8AcceptanceTest {
 
     /** Run this selector in each navigation mode; the harness owns mode switching. */
     @Test fun navigationBarBackgroundMatchesThemeInCurrentNavigationMode() {
-        fun assertNativeBottomBackground(palette: ReaderPalette) {
+        fun assertNativeBottomBackground(
+            scenario: ActivityScenario<MainActivity>, palette: ReaderPalette, screen: String,
+        ) {
             compose.waitForIdle()
             // System-bar/inset animations are outside Compose's idling resource. Sample the
             // native screenshot, including system bars, rather than the Compose content root.
-            compose.waitUntil(15_000) {
+            try {
+                compose.waitUntil(15_000) {
+                    val bitmap = instrumentation.uiAutomation.takeScreenshot()
+                        ?: error("Unable to capture native navigation background")
+                    try {
+                        bitmap.getPixel(1, bitmap.height - 2) == Color(palette.bg).toArgb()
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+            } catch (failure: Throwable) {
+                var native = ""
+                var navigationBottom = 0
+                scenario.onActivity { activity ->
+                    val decor = activity.window.decorView
+                    val insets = ViewCompat.getRootWindowInsets(decor)
+                    val nav = insets?.getInsets(WindowInsetsCompat.Type.navigationBars())
+                    navigationBottom = nav?.bottom ?: 0
+                    val position = IntArray(2)
+                    decor.getLocationOnScreen(position)
+                    val visibleFrame = android.graphics.Rect()
+                    decor.getWindowVisibleDisplayFrame(visibleFrame)
+                    val controller = WindowCompat.getInsetsController(activity.window, decor)
+                    val model = ViewModelProvider(activity)[ShelfViewModel::class.java]
+                    native = "decor=${decor.width}x${decor.height} position=${position.contentToString()} " +
+                        "visibleFrame=$visibleFrame navigation=$nav " +
+                        "status=${insets?.getInsets(WindowInsetsCompat.Type.statusBars())} " +
+                        "systemGestures=${insets?.getInsets(WindowInsetsCompat.Type.systemGestures())} " +
+                        "mandatoryGestures=${insets?.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())} " +
+                        "cutoutInsets=${insets?.getInsets(WindowInsetsCompat.Type.displayCutout())} " +
+                        "displayCutout=${insets?.displayCutout} " +
+                        "navigationVisible=${insets?.isVisible(WindowInsetsCompat.Type.navigationBars())} " +
+                        "statusVisible=${insets?.isVisible(WindowInsetsCompat.Type.statusBars())} " +
+                        "navigationBarColor=#${activity.window.navigationBarColor.toUInt().toString(16)} " +
+                        "navigationContrast=${activity.window.isNavigationBarContrastEnforced} " +
+                        "lightStatus=${controller.isAppearanceLightStatusBars} " +
+                        "lightNavigation=${controller.isAppearanceLightNavigationBars} " +
+                        "vmTheme=${model.theme} reader=${model.reader?.javaClass?.simpleName}"
+                }
                 val bitmap = instrumentation.uiAutomation.takeScreenshot()
-                    ?: error("Unable to capture native navigation background")
-                try {
-                    bitmap.getPixel(1, bitmap.height - 2) == Color(palette.bg).toArgb()
+                val pixels = if (bitmap == null) "native screenshot unavailable" else try {
+                    val xs = listOf(1, bitmap.width / 4, bitmap.width / 2, bitmap.width * 3 / 4, bitmap.width - 2).distinct()
+                    val ys = listOf(
+                        bitmap.height - 2,
+                        bitmap.height - navigationBottom.coerceAtLeast(2) / 2,
+                        bitmap.height - navigationBottom.coerceAtLeast(2) + 2,
+                        bitmap.height / 2,
+                    ).distinct()
+                    val samples = ys.flatMap { y -> xs.map { x -> x to y } }
+                        .filter { (x, y) -> x in 0 until bitmap.width && y in 0 until bitmap.height }
+                        .joinToString { (x, y) -> "($x,$y)=#${bitmap.getPixel(x, y).toUInt().toString(16)}" }
+                    "bitmap=${bitmap.width}x${bitmap.height} config=${bitmap.config} colorSpace=${bitmap.colorSpace} samples=[$samples]"
                 } finally {
                     bitmap.recycle()
                 }
+                val diagnostic = "Navigation background failed screen=$screen " +
+                    "expected=#${Color(palette.bg).toArgb().toUInt().toString(16)} " +
+                    "sample=(1,height-2) $pixels native={$native}"
+                android.util.Log.e("V8NavigationPixels", diagnostic, failure)
+                throw AssertionError(diagnostic, failure)
             }
         }
         launch().use { scenario ->
@@ -316,14 +372,14 @@ class V8AcceptanceTest {
                 vm(scenario) { it.selectTheme(theme) }
                 shelfColor(palette)
                 assertBars(scenario, darkIcons = !palette.dark)
-                assertNativeBottomBackground(palette)
+                assertNativeBottomBackground(scenario, palette, "shelf")
                 open(scenario, markdown)
                 waitText("field-notes.md")
                 compose.waitUntil(25_000) {
                     js(scenario, "document.readyState==='complete' && !!document.querySelector('#content h1') && document.documentElement.dataset.theme === '${theme.id}'") == "true"
                 }
                 assertBars(scenario, darkIcons = !palette.dark)
-                assertNativeBottomBackground(palette)
+                assertNativeBottomBackground(scenario, palette, "markdown")
                 vm(scenario) { it.backToShelf() }
                 waitText("书架")
             }

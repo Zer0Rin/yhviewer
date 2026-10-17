@@ -16,6 +16,7 @@ import org.junit.runner.RunWith
 class PythonRuntimeIntegrationTest : PermissionWebViewFixture() {
     private var generation=0
     private fun run(code:String,timeout:Int=5_000):JSONObject {
+        val startedAt=android.os.SystemClock.elapsedRealtime()
         assertTrue(AppCapabilities.pythonAvailable)
         val html=CodeRunner.render(code,Templates.get(compose.activity,CodeRunner.TEMPLATE),ReaderTheme.PAPER,timeout,CodeRunner.Lang.PYTHON)
         val id=++generation
@@ -30,7 +31,13 @@ class PythonRuntimeIntegrationTest : PermissionWebViewFixture() {
             ready
         }
         compose.waitUntil(70_000) { js("window.__runResult && window.__runResult.state !== 'running'")=="true" }
-        return JSONObject(js("window.__runResult"))
+        val result=JSONObject(js("window.__runResult"))
+        val elapsedMs=android.os.SystemClock.elapsedRealtime()-startedAt
+        val runnerTime=js("document.getElementById('time').textContent.slice(0, 100)")
+        val runnerOutput=js("document.getElementById('out').textContent.slice(0, 1000)")
+        val webViewPackage=android.webkit.WebView.getCurrentWebViewPackage()
+        android.util.Log.i("PythonRuntimeAcceptance", "elapsedMs=$elapsedMs result=$result runnerTime=$runnerTime webView=${webViewPackage?.packageName}/${webViewPackage?.versionName} output=$runnerOutput")
+        return result
     }
     private fun output()=JSONTokener(js("document.getElementById('out').textContent")).nextValue() as String
     @Test fun realStdlibUnicodeAndAwaitExecuteFromBundledRuntime() {
