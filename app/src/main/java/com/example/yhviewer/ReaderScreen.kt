@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -95,9 +95,10 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = {
+        topBar = { Column {
             TopAppBar(
-                title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // 文件名不是书名：用界面字体，不用标题衬线
+                title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
                 navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                 actions = {
                     val runLang = doc?.let { CodeRunner.runnableLang(CodeLanguages.forFileName(it.name), AppCapabilities.pythonAvailable) }
@@ -133,7 +134,9 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                     }
                 },
             )
-        },
+            // 顶栏和正文同色（都跟随阅读主题），用一条细线分开
+            HorizontalDivider(color = LocalYH.current.lineSoft)
+        } },
     ) { padding ->
         val m = Modifier.padding(padding).fillMaxSize()
         when (state) {
@@ -224,7 +227,14 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 modifier = Modifier.align(Alignment.TopCenter),
             ) {
                 TopAppBar(
-                    title = { Text(titles.getOrNull(vm.chapter) ?: doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = {
+                        Text(
+                            titles.getOrNull(vm.chapter) ?: doc.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium, // 章节名用标题衬线，和正文一致
+                        )
+                    },
                     navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                     actions = {
                         if (titles.size > 1) TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
@@ -315,17 +325,16 @@ private fun ImmersiveSystemBars(hidden: Boolean, darkIcons: Boolean) {
     val view = LocalView.current
     val window = (LocalContext.current as? Activity)?.window ?: return
     val controller = remember(window, view) { WindowCompat.getInsetsController(window, view) }
+    val currentDarkIcons by androidx.compose.runtime.rememberUpdatedState(darkIcons)
     DisposableEffect(window, view) {
         val insets = ViewCompat.getRootWindowInsets(view)
         val statusVisible = insets?.isVisible(WindowInsetsCompat.Type.statusBars()) ?: true
         val navVisible = insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) ?: true
         val behavior = controller.systemBarsBehavior
-        val previousStatusAppearance = controller.isAppearanceLightStatusBars
-        val previousNavAppearance = controller.isAppearanceLightNavigationBars
         onDispose {
             controller.systemBarsBehavior = behavior
-            controller.isAppearanceLightStatusBars = previousStatusAppearance
-            controller.isAppearanceLightNavigationBars = previousNavAppearance
+            controller.isAppearanceLightStatusBars = currentDarkIcons
+            controller.isAppearanceLightNavigationBars = currentDarkIcons
             if (statusVisible) controller.show(WindowInsetsCompat.Type.statusBars()) else controller.hide(WindowInsetsCompat.Type.statusBars())
             if (navVisible) controller.show(WindowInsetsCompat.Type.navigationBars()) else controller.hide(WindowInsetsCompat.Type.navigationBars())
         }
@@ -356,16 +365,16 @@ private fun chapterTitles(doc: OpenedDoc): List<String> = when (doc) {
 
 @Composable
 private fun ChapterBar(index: Int, count: Int, onPrev: () -> Unit, onNext: () -> Unit) {
-    BottomAppBar { // 自带导航栏 inset 处理
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onPrev, enabled = index > 0) { Text("‹ 上一章") }
-            Text(
-                if (count > 1) "${index + 1} / $count" else "",
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            TextButton(onClick = onNext, enabled = index < count - 1) { Text("下一章 ›") }
-        }
+    // 浮动胶囊（Lens）：不再是贴底的整条工具栏，正文在胶囊两侧和下方仍然可见
+    FloatingCapsule {
+        TextButton(onClick = onPrev, enabled = index > 0) { Text("‹ 上一章") }
+        Text(
+            if (count > 1) "${index + 1} / $count" else "",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelLarge,
+            color = LocalYH.current.muted,
+        )
+        TextButton(onClick = onNext, enabled = index < count - 1) { Text("下一章 ›") }
     }
 }

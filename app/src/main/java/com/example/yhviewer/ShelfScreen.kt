@@ -9,6 +9,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -24,6 +28,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -195,6 +200,11 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
     LaunchedEffect(sections) {
         selectedIds = pruneShelfSelection(selectedIds, sections)
     }
+    // 书籍区的排列：封面墙（默认）或列表。存在本地偏好里，下次打开保持
+    val context = LocalContext.current
+    val shelfPrefs = remember { context.getSharedPreferences("shelf_prefs", android.content.Context.MODE_PRIVATE) }
+    var booksAsGrid by remember { mutableStateOf(shelfPrefs.getBoolean(KEY_BOOKS_GRID, true)) }
+
     fun toggle(b: Book) {
         selectedIds = if (b.id in selectedIds) selectedIds - b.id else selectedIds + b.id
     }
@@ -244,15 +254,28 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = if (selecting) 96.dp else 32.dp),
                 ) {
                     sections.continueReading?.let { hero ->
-                        sectionLabel("继续阅读", DateUtils.getRelativeTimeSpanString(hero.lastOpenedAt).toString())
+                        sectionLabel("继续阅读", relativeTime(hero.lastOpenedAt).toString())
                         item(key = "hero") {
                             ContinueCard(vm, hero, selectedOf(hero), onClick = { onClick(hero) }, onLongClick = { onLongClick(hero) })
                         }
                     }
                     if (sections.books.isNotEmpty()) {
-                        sectionLabel("书籍", "${sections.books.size + (if (sections.continueReading != null) 1 else 0)} 本")
-                        items(sections.books, key = { it.id }) { b ->
-                            BookShelfRow(vm, b, selectedOf(b), onClick = { onClick(b) }, onLongClick = { onLongClick(b) })
+                        item(key = "label-书籍") {
+                            BooksLabel(
+                                count = sections.books.size + (if (sections.continueReading != null) 1 else 0),
+                                grid = booksAsGrid,
+                                onGrid = { booksAsGrid = it; shelfPrefs.edit().putBoolean(KEY_BOOKS_GRID, it).apply() },
+                            )
+                        }
+                        if (booksAsGrid) {
+                            // 封面墙：每行 3 本。按行分组放进 LazyColumn，避免在 LazyColumn 里嵌套 LazyGrid
+                            items(sections.books.chunked(GRID_COLUMNS), key = { row -> "row-${row.first().id}" }) { row ->
+                                BookGridRow(vm, row, { selectedOf(it) }, { onClick(it) }, { onLongClick(it) })
+                            }
+                        } else {
+                            items(sections.books, key = { it.id }) { b ->
+                                BookShelfRow(vm, b, selectedOf(b), onClick = { onClick(b) }, onLongClick = { onLongClick(b) })
+                            }
                         }
                     }
                     if (sections.docs.isNotEmpty()) {
@@ -318,7 +341,12 @@ private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (list != null && list.isNotEmpty()) {
                 val nBooks = list.count { it.isBook }
-                Text("$nBooks 本书 · ${list.size - nBooks} 份文档", style = MaterialTheme.typography.labelSmall, color = yh.subtle)
+                val reading = list.count { it.isBook && it.progress > 0f && it.progress < 0.995f }
+                Text(
+                    "$nBooks 本书 · ${list.size - nBooks} 份文档" + (if (reading > 0) " · $reading 本在读" else ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = yh.subtle,
+                )
             }
             Text("书架", style = MaterialTheme.typography.headlineLarge, color = yh.fg)
         }
@@ -335,37 +363,43 @@ private fun SelectionHeader(count: Int, allSelected: Boolean, onSelectAll: () ->
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("多选", style = MaterialTheme.typography.labelSmall, color = yh.accent)
-            Text("已选 $count 项", style = MaterialTheme.typography.headlineLarge, color = yh.fg)
+            // 数字用无衬线：衬线体的 "1" 在大字号下容易看成 "l"
+            Text("已选 $count 项", style = MaterialTheme.typography.headlineLarge.copy(fontFamily = YHFonts.sans), color = yh.fg)
         }
         if (!allSelected) PlainAction("全选", onSelectAll)
         PlainAction("取消", onCancel)
     }
 }
 
-/** 朱红描边的直角按钮：书架上唯一的主要动作 */
+/** 强调色描边的胶囊按钮：书架上唯一的主要动作（控件圆润，见 YHTheme 的形状规则） */
 @Composable
 internal fun OutlineAction(label: String, onClick: () -> Unit) {
     val yh = LocalYH.current
+    val interaction = remember { MutableInteractionSource() }
     Text(
         label,
         modifier = Modifier
-            .border(1.dp, yh.accent, RectangleShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .pressScale(interaction)
+            .clip(PillShape)
+            .border(1.dp, yh.accent, PillShape)
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
         style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp),
         color = yh.accent,
     )
 }
 
 @Composable
-internal fun PlainAction(label: String, onClick: () -> Unit, color: Color = LocalYH.current.fg, enabled: Boolean = true) {
+internal fun PlainAction(label: String, onClick: () -> Unit, color: Color = LocalYH.current.fg, enabled: Boolean = true, modifier: Modifier = Modifier) {
     Text(
         label,
-        modifier = Modifier
+        modifier = modifier
+            .heightIn(min = 48.dp)
             .semantics { contentDescription = label }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         style = MaterialTheme.typography.labelLarge,
+        textAlign = TextAlign.Center,
         color = if (enabled) color else color.copy(alpha = 0.38f),
     )
 }
@@ -435,7 +469,12 @@ private fun ScopeTab(label: String, count: Int, on: Boolean, onClick: () -> Unit
             .semantics { contentDescription = "$label，$count 项"; this.selected = on }
             .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "管理分组" })
             .drawBehind {
-                if (on) drawRect(yh.accent, topLeft = Offset(0f, size.height - 2.dp.toPx()), size = size.copy(height = 2.dp.toPx()))
+                // 选中标记：文字下方一段 16×2dp 的短线（Lattice 的标签指示），不铺满整个标签
+                if (on) drawRect(
+                    yh.accent,
+                    topLeft = Offset(0f, size.height - 2.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 2.dp.toPx()),
+                )
             }
             .padding(top = 4.dp, bottom = 10.dp),
         verticalAlignment = Alignment.Bottom,
@@ -464,9 +503,11 @@ private fun KindChips(counts: List<Pair<ContentKind, Int>>, selected: ContentKin
             Row(
                 Modifier
                     .semantics { this.selected = on } // 参数名 selected 会遮住语义属性，必须写 this.
-                    .border(1.dp, if (on) yh.accent else yh.lineSoft, RectangleShape)
+                    .clip(PillShape)
+                    .background(if (on) yh.accent.copy(alpha = 0.12f) else Color.Transparent)
+                    .border(1.dp, if (on) yh.accent else yh.lineSoft, PillShape)
                     .clickable(role = Role.Checkbox) { onSelect(if (on) null else k) }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(k.label, style = MaterialTheme.typography.labelMedium, color = if (on) yh.accent else yh.muted)
@@ -498,41 +539,129 @@ private fun Modifier.selectionBackground(selected: Boolean?, color: Color) =
 private fun ContinueCard(vm: ShelfViewModel, book: Book, selected: Boolean?, onClick: () -> Unit, onLongClick: () -> Unit) {
     val yh = LocalYH.current
     val (title, author) = BookTitles.display(book)
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .selectionBackground(selected, yh.surface)
-                .semantics { if (selected != null) this.selected = selected }
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "多选")
-                .padding(bottom = 16.dp),
-        ) {
-            BookCover(vm, book, width = 96.dp, selected = selected)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f).height(144.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleLarge, color = yh.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                author?.let { Text("$it 著", style = MaterialTheme.typography.bodySmall, color = yh.muted, maxLines = 1) }
-                Spacer(Modifier.weight(1f))
-                ProgressLine(book.progress)
-                Row {
-                    Text(percent(book.progress), style = MaterialTheme.typography.bodySmall, color = yh.subtle, modifier = Modifier.weight(1f))
-                    if (book.favorite) Text("★", color = yh.accent, style = MaterialTheme.typography.bodySmall)
-                }
-                if (selected == null) {
-                    Text(
-                        "继续 ›",
-                        modifier = Modifier
-                            .padding(top = 4.dp)
-                            .background(yh.accent)
-                            .clickable(role = Role.Button, onClick = onClick)
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = yh.onAccent,
-                    )
-                }
+    val interaction = remember { MutableInteractionSource() }
+    // "继续阅读"是书架上唯一一块铺底色的区域：表面色 + 直角，让它和下面的列表拉开层次
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(if (selected == true) yh.lineSoft else yh.surface)
+            .semantics { if (selected != null) this.selected = selected }
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = "多选",
+            )
+            .padding(16.dp),
+    ) {
+        Box(Modifier.pressScale(interaction)) { BookCover(vm, book, width = 100.dp, selected = selected) }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f).heightIn(min = 150.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, color = yh.fg, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            author?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = yh.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.weight(1f))
+            DotProgress(book.progress)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "读到 ${percent(book.progress)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = yh.subtle,
+                    modifier = Modifier.weight(1f),
+                )
+                if (book.favorite) Text("★", color = yh.accent, style = MaterialTheme.typography.bodySmall)
+            }
+            if (selected == null) {
+                Text(
+                    "继续阅读 ›",
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(PillShape)
+                        .background(yh.accent)
+                        .clickable(role = Role.Button, onClick = onClick)
+                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = yh.onAccent,
+                )
             }
         }
-        HorizontalDivider(color = yh.lineSoft)
+    }
+}
+
+/** "书籍 · N 本" 标签，右侧切换封面墙 / 列表 */
+@Composable
+private fun BooksLabel(count: Int, grid: Boolean, onGrid: (Boolean) -> Unit) {
+    val yh = LocalYH.current
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("书籍 · $count 本", style = MaterialTheme.typography.labelSmall, color = yh.subtle, modifier = Modifier.weight(1f))
+        listOf(true to "封面", false to "列表").forEach { (value, label) ->
+            Text(
+                label,
+                modifier = Modifier
+                    .semantics { this.selected = value == grid }
+                    .clickable(role = Role.Tab) { onGrid(value) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (value == grid) yh.fg else yh.subtle,
+            )
+        }
+    }
+}
+
+/** 封面墙的一行：固定 GRID_COLUMNS 格，最后一行不满时用空位补齐，封面宽度保持一致 */
+@Composable
+private fun BookGridRow(
+    vm: ShelfViewModel,
+    row: List<Book>,
+    selectedOf: (Book) -> Boolean?,
+    onClick: (Book) -> Unit,
+    onLongClick: (Book) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        row.forEach { b ->
+            BookGridCell(vm, b, selectedOf(b), { onClick(b) }, { onLongClick(b) }, Modifier.weight(1f))
+        }
+        repeat(GRID_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookGridCell(
+    vm: ShelfViewModel,
+    book: Book,
+    selected: Boolean?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier,
+) {
+    val yh = LocalYH.current
+    val (title, author) = BookTitles.display(book)
+    val interaction = remember { MutableInteractionSource() }
+    Column(
+        modifier
+            .semantics(mergeDescendants = true) { if (selected != null) this.selected = selected }
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null, // 封面自己有按压缩放，不再叠加水波纹
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = "多选",
+            ),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth().pressScale(interaction)) {
+            BookCover(vm, book, width = maxWidth, selected = selected)
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+            color = yh.fg,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(author ?: percent(book.progress), style = MaterialTheme.typography.bodySmall, color = yh.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        DotProgress(book.progress, dotSize = 2.5.dp)
     }
 }
 
@@ -559,7 +688,7 @@ private fun BookShelfRow(vm: ShelfViewModel, book: Book, selected: Boolean?, onC
                 ProgressLine(book.progress)
                 Row(Modifier.padding(top = 4.dp)) {
                     Text(
-                        "${percent(book.progress)} · ${DateUtils.getRelativeTimeSpanString(book.lastOpenedAt)}",
+                        "${percent(book.progress)} · ${relativeTime(book.lastOpenedAt)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = yh.subtle,
                         modifier = Modifier.weight(1f),
@@ -599,7 +728,7 @@ fun BookCover(vm: ShelfViewModel, book: Book, width: Dp, selected: Boolean? = nu
     }
 }
 
-/** 直角勾选框：选中 = 朱红实心 + 勾；未选 = 细线空框（在封面上时加半透明底，保证看得清） */
+/** 勾选框：选中 = 强调色实心 + 勾；未选 = 细线空框（在封面上时加半透明底，保证看得清） */
 @Composable
 internal fun CheckSquare(checked: Boolean, modifier: Modifier = Modifier, onImage: Boolean = false) {
     val yh = LocalYH.current
@@ -687,7 +816,7 @@ private fun DocShelfRow(book: Book, selected: Boolean?, onClick: () -> Unit, onL
                 Text(book.name, style = MaterialTheme.typography.labelLarge, color = yh.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row {
                     Text(
-                        "${book.contentKind.label} · ${DateUtils.getRelativeTimeSpanString(book.lastOpenedAt)} · " +
+                        "${book.contentKind.label} · ${relativeTime(book.lastOpenedAt)} · " +
                             Formatter.formatShortFileSize(context, book.sizeBytes),
                         style = MaterialTheme.typography.bodySmall,
                         color = yh.subtle,
@@ -745,3 +874,6 @@ private fun EmptyShelf(onOpenFile: () -> Unit) {
         OutlineAction("＋ 打开文件", onOpenFile)
     }
 }
+
+private const val GRID_COLUMNS = 3
+private const val KEY_BOOKS_GRID = "books_grid"

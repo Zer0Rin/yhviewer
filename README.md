@@ -7,7 +7,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-**v0.4.0 candidate** adds shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
+**v0.5.0 candidate** unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -15,11 +15,11 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|---|---|---|---|
 | ![](docs/screenshots/shelf.png) | ![](docs/screenshots/html.png) | ![](docs/screenshots/markdown.png) | ![](docs/screenshots/code.png) | ![](docs/screenshots/epub.png) | ![](docs/screenshots/sandbox.png) |
 
-| Dark shelf | Multi-selection | Chapter drawer |
-|---|---|---|
-| ![](docs/screenshots/v4-shelf-dark.png) | ![](docs/screenshots/v4-selection.png) | ![](docs/screenshots/toc.png) |
+| Ink shelf | Multi-selection | Chapter drawer | Terminal reader | Paper Markdown |
+|---|---|---|---|---|
+| ![](docs/screenshots/shelf-ink.png) | ![](docs/screenshots/v4-selection.png) | ![](docs/screenshots/toc.png) | ![](docs/screenshots/v4-terminal-reader.png) | ![](docs/screenshots/markdown-paper.png) |
 
-**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
+**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 

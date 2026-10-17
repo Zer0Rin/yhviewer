@@ -2,8 +2,11 @@ package com.example.yhviewer
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,12 +27,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // 三键导航时，enableEdgeToEdge() 默认在导航栏后面放一层半透明白色遮罩（截图里底部那条白带）。
+        // 内容已经自己处理了 inset：这里把系统栏设成全透明并关掉对比度遮罩，让底色一直铺到屏幕底部。
+        // 图标深浅不在这里定，由 YHTheme 按当前色板设置。
+        val transparent = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
+        enableEdgeToEdge(statusBarStyle = transparent, navigationBarStyle = transparent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         if (savedInstanceState == null) {
             extractUri(intent)?.let(vm::importAndOpen)
         }
         setContent {
-            YHTheme { AppRoot(vm) }
+            YHTheme(vm.theme) { AppRoot(vm) }  // 外壳颜色跟随阅读主题
         }
     }
 

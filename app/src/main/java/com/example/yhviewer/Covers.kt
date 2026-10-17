@@ -70,7 +70,18 @@ object BookTitles {
             return Parsed(title, author)
         }
         DASH.matchEntire(base)?.let { return Parsed(it.groupValues[1].trim(), it.groupValues[2].trim()) }
-        return Parsed(base, null)
+        return Parsed(prettify(base), null)
+    }
+
+    private val SEPARATORS = Regex("[-_.]+")
+
+    /**
+     * 文件名式的书名变成可读的书名：night-train → night train，my_notes.v2 → my notes v2。
+     * 只处理整串都是西文 / 数字 / 分隔符的情况；含中文时原样保留（中文书名里的 "-" 多半是有意的）。
+     */
+    internal fun prettify(base: String): String {
+        if (base.any { it.code > 0x7F } || !SEPARATORS.containsMatchIn(base)) return base
+        return base.replace(SEPARATORS, " ").trim().ifEmpty { base }
     }
 
     /** 书架上显示的书名和作者：EPUB 用元数据，其他用文件名解析 */

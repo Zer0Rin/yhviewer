@@ -2,6 +2,8 @@ package com.example.yhviewer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -221,42 +223,33 @@ private fun TocRow(e: TocEntry, isCurrent: Boolean, isRead: Boolean, onClick: ()
     }
 }
 
-/** 2dp 细进度线：底色弱细线，已读部分朱红 */
+/** 阅读进度。v8 起是点阵（DotProgress，见 ShelfVisuals.kt）；保留这个名字，调用处不用改 */
 @Composable
-fun ProgressLine(fraction: Float, modifier: Modifier = Modifier) {
-    val yh = LocalYH.current
-    val f = fraction.coerceIn(0f, 1f)
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(2.dp)
-            .background(yh.lineSoft)
-            .drawBehind { drawRect(yh.accent, size = size.copy(width = size.width * f)) },
-    )
-}
+fun ProgressLine(fraction: Float, modifier: Modifier = Modifier) = DotProgress(fraction, modifier)
 
-/** 只有一条底线的输入框（Overture 风格：不用圆角描边框） */
+/** 只有一排点作底线的输入框（Lattice 风格）。聚焦时点变成强调色并收紧 */
 @Composable
 fun UnderlineField(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
     val yh = LocalYH.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = yh.fg),
         cursorBrush = SolidColor(yh.cold),
+        interactionSource = interaction,
         modifier = modifier.fillMaxWidth(),
         decorationBox = { inner ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .drawBehind {
-                        drawLine(yh.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
-                    }
+                    .dotRule(color = yh.line, focusedColor = yh.accent, focused = focused)
                     .padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("⌕", color = yh.subtle, style = MaterialTheme.typography.bodyLarge)
+                Text("⌕", color = if (focused) yh.accent else yh.subtle, style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.weight(1f)) {
                     if (value.isEmpty()) Text(placeholder, color = yh.subtle, style = MaterialTheme.typography.bodyMedium, maxLines = 1)

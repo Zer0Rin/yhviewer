@@ -201,20 +201,14 @@ fun SelectionBar(
     onDetails: () -> Unit,
 ) {
     val yh = LocalYH.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(yh.surface)
-            .drawBehind { drawLine(yh.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PlainAction("移到分组", onMove)
-        PlainAction(if (allFavorite) "取消收藏" else "收藏", onFavorite)
-        PlainAction("详情", onDetails, enabled = single)
-        PlainAction("删除", onDelete, color = yh.accent)
+    // 浮动胶囊（Lens）：浮在列表上方，不再是贴底的整条工具栏
+    FloatingCapsule {
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
+            PlainAction("移到分组", onMove, modifier = Modifier.weight(1f))
+            PlainAction(if (allFavorite) "取消收藏" else "收藏", onFavorite, modifier = Modifier.weight(1f))
+            PlainAction("详情", onDetails, enabled = single, modifier = Modifier.weight(1f))
+            PlainAction("删除", onDelete, color = yh.accent, modifier = Modifier.weight(1f))
+        }
     }
 }
 

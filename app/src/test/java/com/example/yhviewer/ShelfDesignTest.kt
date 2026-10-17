@@ -28,7 +28,7 @@ class ShelfDesignTest {
         assertEquals(BookTitles.Parsed("三体", null), BookTitles.parse("《三体》（校对版）.txt"))
         assertEquals(BookTitles.Parsed("三体", "刘慈欣"), BookTitles.parse("三体 作者:刘慈欣.txt"))
         assertEquals(BookTitles.Parsed("三体", "刘慈欣"), BookTitles.parse("三体 - 刘慈欣.txt"))
-        assertEquals(BookTitles.Parsed("notes-2024", null), BookTitles.parse("notes-2024.txt"))
+        assertEquals(BookTitles.Parsed("notes 2024", null), BookTitles.parse("notes-2024.txt"))
         assertEquals(BookTitles.Parsed("夜车", null), BookTitles.parse("夜车"))
     }
 
