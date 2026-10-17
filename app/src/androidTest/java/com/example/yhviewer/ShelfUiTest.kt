@@ -2,6 +2,7 @@ package com.example.yhviewer
 
 import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
 import android.view.View
@@ -53,6 +54,11 @@ class ShelfUiTest {
         compose.onNode(hasSetTextAction()).performTextReplacement(value)
         compose.waitForIdle()
     }
+    private fun exportScreenshot(name: String) {
+        compose.waitForIdle()
+        exportV7Screenshot(name)
+    }
+
     private fun cleanup() = runBlocking {
         created.forEach { uri ->
             dao.findBySource(uri.toString())?.let { ShelfRepository(context, AppDatabase.get(context)).delete(it.id) }
@@ -82,35 +88,91 @@ class ShelfUiTest {
                 search("a_b")
                 waitText("Alpha_a_b.html")
                 compose.onNodeWithText("HTML").assertIsDisplayed()
-                compose.onNode(hasText("·", substring=true)).assertIsDisplayed()
+                compose.onAllNodes(hasText("·", substring=true)).onLast().assertIsDisplayed()
                 search("ALPHA")
                 waitText("Alpha_a_b.html")
                 search("中文")
                 waitText("中文50%.md")
                 search("Alpha")
                 waitText("Alpha_a_b.html")
+                compose.onNodeWithText("Alpha_a_b.html").performTouchInput { longClick() }
+                waitText("已选 1 项")
                 compose.onNodeWithContentDescription("收藏").performClick()
+                compose.onNodeWithContentDescription("取消").performClick()
                 compose.waitUntil(10_000) { runBlocking { dao.findBySource(alpha.toString())!!.favorite } }
                 search("")
-                compose.onNodeWithText("只看收藏").performClick()
+                compose.onNodeWithContentDescription("收藏，1 项").performClick()
                 waitText("Alpha_a_b.html")
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("beta.md").fetchSemanticsNodes().isEmpty() }
-                compose.onNodeWithContentDescription("取消收藏").assertIsDisplayed()
                 compose.onNodeWithText("Alpha_a_b.html").performTouchInput { longClick() }
-                waitText("从书架移除")
-                compose.onNodeWithText("从书架移除").performClick()
-                compose.onNodeWithText("取消").performClick()
+                waitText("已选 1 项")
+                compose.onNodeWithText("删除").performClick()
+                waitText("从书架移除？")
+                compose.onNode(hasText("取消") and hasAnyAncestor(isDialog())).performClick()
+                androidx.test.espresso.Espresso.closeSoftKeyboard()
                 androidx.test.espresso.Espresso.pressBack()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("已选 1 项").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithText("Alpha_a_b.html").assertIsDisplayed()
                 compose.onNodeWithText("Alpha_a_b.html").performTouchInput { longClick() }
-                waitText("从书架移除")
-                compose.onNodeWithText("从书架移除").performClick()
+                waitText("已选 1 项")
+                compose.onNodeWithText("删除").performClick()
+                waitText("从书架移除？")
                 compose.onNodeWithText("移除").performClick()
-                waitText("没有匹配的文档")
+                waitText("这里还没有内容")
                 assertNull(runBlocking { dao.findBySource(alpha.toString()) })
                 assertNotNull(context.contentResolver.openInputStream(alpha)?.use { it.read() })
             }
         } finally { cleanup() }
+    }
+
+
+    @Test fun selectionCreatesGroupMovesAndDeletesGroupWithoutDeletingDocuments() {
+        val uri = document("group-selection.md", "# Group selection")
+        val db = AppDatabase.get(context)
+        val repo = ShelfRepository(context, db)
+        val groupName = "测试分组${System.nanoTime().toString().takeLast(6)}"
+        try {
+            ActivityScenario.launch<MainActivity>(intent(uri)).use { scenario ->
+                waitText("group-selection.md")
+                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                waitText("书架")
+                waitText("group-selection.md")
+                exportScreenshot("light-shelf.png")
+                compose.onNodeWithText("group-selection.md").performTouchInput { longClick() }
+                waitText("已选 1 项")
+                scenario.recreate()
+                waitText("已选 1 项")
+                compose.onNodeWithText("详情").assertIsEnabled()
+                exportScreenshot("selection.png")
+                compose.onNodeWithText("移到分组").performClick()
+                waitText("＋ 新建分组并移入")
+                compose.onNodeWithText("＋ 新建分组并移入").performClick()
+                waitText("新建分组并移入 1 项")
+                compose.onAllNodes(hasSetTextAction()).onLast().performTextInput(groupName)
+                compose.onNodeWithText("确定").performClick()
+                compose.waitUntil(10_000) { runBlocking { dao.findBySource(uri.toString())?.groupId != null } }
+                val before = runBlocking { dao.findBySource(uri.toString())!! }
+                compose.onNodeWithContentDescription("$groupName，1 项").performClick()
+                scenario.recreate()
+                waitText("group-selection.md")
+                compose.onNodeWithContentDescription("$groupName，1 项").assertIsSelected()
+                search("query-that-matches-no-documents")
+                waitText("没有匹配「query-that-matches-no-documents」的内容")
+                compose.onNodeWithContentDescription("$groupName，0 项").performTouchInput { longClick() }
+                waitText("删除分组")
+                compose.onNodeWithText("删除分组").performClick()
+                waitText("删除分组「$groupName」？")
+                waitText("里面的 1 项会回到「未分组」，文件和阅读进度都不会删除。")
+                compose.onNodeWithText("删除分组").performClick()
+                compose.waitUntil(10_000) { runBlocking { dao.findBySource(uri.toString())?.groupId == null } }
+                val after = runBlocking { dao.findBySource(uri.toString())!! }
+                assertEquals(before.copy(groupId = null), after)
+                assertNotNull(context.contentResolver.openInputStream(uri)?.use { it.read() })
+            }
+        } finally {
+            runBlocking { repo.observeGroups().first().filter { it.name == groupName }.forEach { repo.deleteGroup(it.id) } }
+            cleanup()
+        }
     }
 
     private fun web(view: View): WebView? {

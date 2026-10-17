@@ -14,6 +14,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +27,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -55,6 +59,21 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { e }
     }
 
+    val covers: CoverStore get() = repo.covers
+
+    init {
+        viewModelScope.launch {
+            // A failed cleanup must remain visible to open/import and must not trigger metadata work.
+            if (startup.await() == null) {
+                for (backfill in listOf<suspend () -> Int>(repo::backfillKinds, repo::backfillCovers)) {
+                    try { backfill() }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { Log.w("ShelfMetadata", "Unable to backfill shelf metadata", e) }
+                }
+            }
+        }
+    }
+
     // ---------------- 偏好 ----------------
     var theme by mutableStateOf(themeStore.load())
         private set
@@ -75,22 +94,46 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- 书架 ----------------
     var query by mutableStateOf("")
         private set
-    var favoritesOnly by mutableStateOf(false)
-        private set
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val books: StateFlow<List<Book>?> =
-        snapshotFlow { query to favoritesOnly }
-            .flatMapLatest { (q, fav) -> repo.observe(q, fav) }
+        snapshotFlow { query }
+            .flatMapLatest { q -> repo.observe(q, false) }
             .stateIn<List<Book>?>(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun updateQuery(q: String) { query = q }
-    fun toggleFavoritesOnly() { favoritesOnly = !favoritesOnly }
     fun toggleFavorite(book: Book) { viewModelScope.launch { repo.setFavorite(book.id, !book.favorite) } }
     fun delete(book: Book) { viewModelScope.launch {
         DocProfiles.revoke(getApplication(), book.id)
         repo.delete(book.id)
     } }
+
+    val groups: StateFlow<List<ShelfGroup>?> = repo.observeGroups()
+        .stateIn<List<ShelfGroup>?>(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private suspend fun <T> shelfResult(block: suspend () -> T): Result<T> = try {
+        startup.await()?.let { throw it }
+        Result.success(block())
+    } catch (e: CancellationException) { throw e }
+      catch (e: Exception) { Result.failure(e) }
+
+    suspend fun createGroup(name: String, moveIds: List<Long> = emptyList()): Result<Long> = shelfResult {
+        repo.createGroupAndMove(name, moveIds)
+    }
+
+    suspend fun renameGroup(id: Long, name: String): Result<Unit> = shelfResult { repo.renameGroup(id, name) }
+    suspend fun groupMemberCount(id: Long): Result<Int> = shelfResult {
+        repo.observe("", false).first().count { it.groupId == id }
+    }
+
+    suspend fun deleteGroup(id: Long): Result<Unit> = shelfResult { repo.deleteGroup(id) }
+    suspend fun moveToGroup(ids: List<Long>, groupId: Long?): Result<Unit> = shelfResult { repo.moveToGroup(ids, groupId) }
+    suspend fun setFavorite(ids: List<Long>, favorite: Boolean): Result<Unit> = shelfResult { repo.setFavorite(ids, favorite) }
+    suspend fun deleteMany(books: List<Book>): Result<Unit> = shelfResult {
+        deleteShelfItems(books.map { it.id }, delete = repo::delete, revoke = { id ->
+            withContext(Dispatchers.Main.immediate) { DocProfiles.revoke(getApplication(), id) }
+        })
+    }
 
     fun setPermissions(bookId: Long, permissions: DocPermissions) {
         viewModelScope.launch {
@@ -322,6 +365,21 @@ private object PositionWrites {
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { Log.w("ReaderProgress", "Unable to save reading position", e) }
             }
+        }
+    }
+}
+
+/** Finish only the started item across caller cancellation; never revoke a profile for a failed delete. */
+internal suspend fun deleteShelfItems(
+    ids: List<Long>,
+    delete: suspend (Long) -> Unit,
+    revoke: suspend (Long) -> Unit,
+) {
+    for (id in ids) {
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            delete(id)
+            revoke(id)
         }
     }
 }

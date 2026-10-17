@@ -43,7 +43,7 @@ class ShelfRepositoryTest {
         root = File(context.cacheDir, "shelf-test-${UUID.randomUUID()}")
         shelfDir = File(root, "shelf")
         srcDir = File(root, "src").apply { mkdirs() }
-        repo = ShelfRepository(context, db, dir = shelfDir, clock = { now }, tmpDir = File(root, "tmp").apply { mkdirs() })
+        repo = ShelfRepository(context, db, dir = shelfDir, clock = { now }, tmpDir = File(root, "tmp").apply { mkdirs() }, covers = CoverStore(File(root, "covers")))
     }
 
     @After
@@ -225,6 +225,118 @@ class ShelfRepositoryTest {
             assertEquals("Cancelled imports must leave no new file", before, shelfDir.listFiles()!!.map { it.name }.toSet())
             assertTrue(File(shelfDir, old.localFile).exists())
         }
+    }
+
+    @Test fun classificationReimportAndEditorSaveFollowContentWithoutChangingReader() = runBlocking<Unit> {
+        val (file, uri) = source("response.unknown", "plain text")
+        val id = repo.import(uri)
+        assertEquals(ContentKind.TEXT.id, db.bookDao().get(id)!!.kind)
+        val group = repo.createGroup("工作")
+        repo.moveToGroup(listOf(id), group)
+        repo.setFavorite(listOf(id), true)
+        repo.savePosition(id, Locator(0, .5f), 1)
+        file.writeText("{\"answer\":42}")
+        repo.import(uri)
+        val data = db.bookDao().get(id)!!
+        assertEquals(ContentKind.DATA.id, data.kind)
+        assertEquals(DocType.UNKNOWN, data.type)
+        assertEquals(group, data.groupId)
+        assertTrue(data.favorite)
+        assertEquals(.5f, data.progress, 0f)
+        repo.updateContent(id, "<!doctype html><html><body>hello</body></html>")
+        assertEquals(ContentKind.WEB.id, db.bookDao().get(id)!!.kind)
+        assertEquals(DocType.UNKNOWN, db.bookDao().get(id)!!.type)
+    }
+
+    @Test fun deletingGroupPreservesFilesAndReadingMetadata() = runBlocking<Unit> {
+        val id = repo.import(source("group.md", "# hi").second)
+        val group = repo.createGroup("待读")
+        repo.moveToGroup(listOf(id), group)
+        repo.savePosition(id, Locator(0, .75f), 1)
+        val before = db.bookDao().get(id)!!
+        repo.deleteGroup(group)
+        assertEquals(before.copy(groupId = null), db.bookDao().get(id))
+        assertTrue(File(shelfDir, before.localFile).exists())
+        assertTrue(db.groupDao().all().isEmpty())
+    }
+
+    @Test fun concurrentCaseInsensitiveGroupCreationAllowsOnlyOneName() = runBlocking<Unit> {
+        val results = listOf("Work", " work ").map { name ->
+            async { runCatching { repo.createGroup(name) } }
+        }.map { it.await() }
+        assertEquals(1, results.count { it.isSuccess })
+        assertEquals(1, db.groupDao().all().size)
+    }
+
+    @Test fun movingToDeletedGroupIsRejected() = runBlocking<Unit> {
+        val id = repo.import(source("group.md", "x").second)
+        val group = repo.createGroup("待读")
+        repo.deleteGroup(group)
+        try {
+            repo.moveToGroup(listOf(id), group)
+            fail("Deleted group must not be referenced")
+        } catch (_: IllegalArgumentException) { }
+        assertNull(db.bookDao().get(id)!!.groupId)
+    }
+
+    @Test fun startupBackfillAndCoverCleanupRetainOnlyLiveData() = runBlocking<Unit> {
+        val id = repo.import(source("data.txt", "{\"x\":1}").second)
+        db.bookDao().update(db.bookDao().get(id)!!.copy(kind = null))
+        assertEquals(1, repo.backfillKinds())
+        assertEquals(ContentKind.DATA.id, db.bookDao().get(id)!!.kind)
+        assertEquals(0, repo.backfillKinds())
+        val coversDir = repo.covers.file(id).parentFile!!.apply { mkdirs() }
+        repo.covers.file(id).writeText("live")
+        File(coversDir, "99999.jpg").writeText("orphan")
+        File(coversDir, "$id.jpg.tmp").writeText("incomplete")
+        assertEquals(2, repo.cleanOrphans())
+        assertTrue(repo.covers.exists(id))
+        repo.deleteMany(listOf(id))
+        assertFalse(repo.covers.exists(id))
+        assertNull(db.bookDao().get(id))
+    }
+
+    @Test fun authorSearchAndReimportReplaceMetadataEvenWhenOptionalCoverUpdateFails() = runBlocking<Unit> {
+        fun book(author: String) = zipOf(
+            "META-INF/container.xml" to """<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>""",
+            "content.opf" to """<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Test book</dc:title><dc:creator>$author</dc:creator></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>""",
+            "c.xhtml" to "<html><body>chapter</body></html>",
+        )
+        val (file, uri) = source("author.epub", book("First Author"))
+        val id = repo.import(uri)
+        assertEquals("First Author", db.bookDao().get(id)!!.author)
+        assertEquals(listOf(id), repo.observe("First Author", false).first().map { it.id })
+        repo.covers.file(id).parentFile!!.mkdirs()
+        repo.covers.file(id).writeText("stale cover")
+        // Optional metadata update fails after the content transaction commits.
+        db.openHelper.writableDatabase.execSQL("""
+            CREATE TRIGGER reject_cover_metadata BEFORE UPDATE OF author ON books
+            WHEN NEW.coverChecked = 1 BEGIN SELECT RAISE(ABORT, 'metadata unavailable'); END
+        """.trimIndent())
+        file.writeBytes(book("Second Author"))
+        assertEquals(id, repo.import(uri))
+        val row = db.bookDao().get(id)!!
+        assertEquals("Second Author", row.author)
+        assertFalse(row.coverChecked)
+        assertTrue(File(shelfDir, row.localFile).isDirectory)
+        assertFalse(repo.covers.exists(id))
+        db.openHelper.writableDatabase.execSQL("DROP TRIGGER reject_cover_metadata")
+        assertEquals(0, repo.backfillCovers())
+        assertTrue(db.bookDao().get(id)!!.coverChecked)
+        assertTrue(repo.observe("First Author", false).first().isEmpty())
+        assertEquals(listOf(id), repo.observe("Second Author", false).first().map { it.id })
+    }
+
+    @Test fun createGroupAndMoveIsAtomicAndSupportsLargeSelections() = runBlocking<Unit> {
+        val template = Book(sourceUri = "", name = "item.txt", type = DocType.TXT,
+            localFile = "unused", sizeBytes = 1, addedAt = 0, lastOpenedAt = 0)
+        val ids = (1..1001).map { db.bookDao().insert(template.copy(sourceUri = "synthetic:$it")) }
+        val group = repo.createGroupAndMove("批量", ids)
+        assertTrue(db.bookDao().observe("", false).first().all { it.groupId == group })
+        repo.setFavorite(ids, true)
+        assertEquals(ids.size, repo.observe("", true).first().size)
+        repo.moveToGroup(ids, null)
+        assertTrue(db.bookDao().observe("", false).first().all { it.groupId == null })
     }
 
 }

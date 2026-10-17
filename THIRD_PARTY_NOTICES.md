@@ -29,3 +29,15 @@ Full [Pyodide license](tools/pyodide/LICENSE.pyodide) and
 See [runtime reproduction and compatibility](tools/pyodide/README.md).
 Strict contains none of these Python runtime assets. Python packages are not
 downloaded at runtime.
+
+## Interface fonts
+
+- Manrope variable font, Google Fonts `ofl/manrope`: SIL Open Font License 1.1.
+  Font: `app/src/main/res/font/manrope.ttf`; full license bundled in
+  `app/src/main/assets/fonts/licenses/Manrope-OFL.txt`.
+
+Unmodified upstream files are from https://github.com/google/fonts.
+
+| Font | SHA-256 |
+| --- | --- |
+| manrope.ttf | 3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6 |

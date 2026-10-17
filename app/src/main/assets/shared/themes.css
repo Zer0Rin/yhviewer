@@ -15,9 +15,9 @@
 
       /* ---- Paper：暖白纸张（默认 / auto 浅色） ---- */
       color-scheme: light;
-      --bg: #faf9f5; --fg: #2b2a27; --muted: #75736c; --border: #e6e3d9;
+      --bg: #faf9f5; --fg: #2b2a27; --muted: #6e6c65; --border: #e6e3d9;
       --heading: #1f1e1b; --strong: #1f1e1b;
-      --accent: #c4633f; --link: #b5532f; --marker: #c4633f; --quote: #75736c;
+      --accent: #c4633f; --link: #ac4d29; --marker: #c4633f; --quote: #6e6c65;
       --code-bg: #f0eee6; --code-fg: #3d3a35; --inline-code: #a8452a;
       --font-body: var(--font-serif); --size: 17px; --line: 1.75;
       --hl-keyword: #a2416b; --hl-string: #4f7a28; --hl-number: #b35d1e; --hl-comment: #9a978d;

@@ -7,7 +7,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-**v0.3.0** includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
+**v0.5.0 candidate** unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -15,7 +15,11 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|---|---|---|---|
 | ![](docs/screenshots/shelf.png) | ![](docs/screenshots/html.png) | ![](docs/screenshots/markdown.png) | ![](docs/screenshots/code.png) | ![](docs/screenshots/epub.png) | ![](docs/screenshots/sandbox.png) |
 
-**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
+| Ink shelf | Multi-selection | Chapter drawer | Terminal reader | Paper Markdown |
+|---|---|---|---|---|
+| ![](docs/screenshots/shelf-ink.png) | ![](docs/screenshots/v4-selection.png) | ![](docs/screenshots/toc.png) | ![](docs/screenshots/v4-terminal-reader.png) | ![](docs/screenshots/markdown-paper.png) |
+
+**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 
@@ -148,7 +152,7 @@ flowchart TB
     VM["ShelfViewModel<br/>navigation · chapter · position"] --> Repo["ShelfRepository"]
     Repo -->|"probe / readText / copyTo"| Loader["DocumentLoader<br/>size caps · CharsetDetector"]
     Repo -->|"EPUB"| Epub["SafeUnzip → EpubParser"]
-    Repo -->|"metadata · locator"| Room[("Room v3")]
+    Repo -->|"metadata · locator"| Room[("Room v4")]
     Repo -->|"UTF-8 copy / extracted book"| Files[("filesDir/shelf/")]
     VM --> Reader["ReaderScreen"]
     Reader -->|"PageSource.Html"| Templates["md · code · txt templates<br/>+ shared themes.css"]
@@ -181,7 +185,7 @@ The suite includes JVM policy/template tests and native database, navigation, re
 | Text | JVM | Encoding detection (UTF-8, BOM, GBK, UTF-16), chapter splitting (TOC at start, long lines, fallback by size), file-type detection |
 | Data | Instrumented (in-memory Room) | Ordering, search with literal `%` / `_`, favorites, unique source |
 | Repository | Instrumented (temp dirs, injected clock) | Import and reopen for every type, atomic re-import, GBK → UTF-8, position round trip, malicious EPUB leaves no files, orphan cleanup |
-| Migration | Instrumented (`MigrationTestHelper`) | v1 → v2 → v3 keeps existing rows, progress and default permissions, schema validated against the exported JSON |
+| Migration | Instrumented (`MigrationTestHelper`) | v1 → v2 → v3 → v4 keeps existing rows, progress and permissions; adds author/cover/classification defaults and groups, schema validated against the exported JSON |
 | Permissions | JVM + instrumented | All 128 bit combinations, presets excluding iframe/network, build capabilities, independent storage, live-profile revocation, real CSP parent/iframe boundary |
 | Reading settings | JVM + instrumented | Finite normalization, safe CSS, confirmed taps, stable viewport, previous chapter end and persisted controls |
 | JS execution | JVM + instrumented | Safe source embedding, syntax/runtime line mapping, real Worker CSP, Unicode line separators, timeout, console flood/forged messages, fresh storage, live themes, stop/restart/close and renderer loss |
@@ -207,7 +211,7 @@ CSP-blocked requests may never reach the interceptor, so Logcat alone is insuffi
 
 Standard edition now provides the permanent network-permission test round; it checks a native HTTPS positive control and the default 9/9 sandbox result. Relaxed permissions intentionally change those expected outcomes. See [v0.3 integration verification](docs/verification/V03_VERIFICATION.md).
 
-See [editor and Python acceptance](docs/verification/EDITOR_PYTHON.md), [JS runner verification](docs/verification/JS_RUNNER.md), [renderer recovery](docs/verification/RENDERER_RECOVERY.md), and [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
+See [v0.4.0 integration verification](docs/verification/V04_VERIFICATION.md), [editor and Python acceptance](docs/verification/EDITOR_PYTHON.md), [JS runner verification](docs/verification/JS_RUNNER.md), [renderer recovery](docs/verification/RENDERER_RECOVERY.md), and [v2 verification](docs/verification/V2_VERIFICATION.md) for the complete suite inventory, local/CI results and upgrade evidence.
 
 ## Tech stack
 

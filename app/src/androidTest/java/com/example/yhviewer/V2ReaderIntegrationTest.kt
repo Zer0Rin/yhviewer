@@ -218,10 +218,14 @@ class V2ReaderIntegrationTest {
             waitText(headings[0]); waitJs(s, "document.getElementById('content')?.textContent.includes('章节1')")
             val row = runBlocking { dao.findBySource(uri.toString())!! }
             assertEquals(novel, File(context.filesDir, "shelf/${row.localFile}").readText())
-            compose.onNodeWithText("目录").performClick(); waitText("目录（3 章）")
-            compose.onNodeWithText(headings[1]).performClick(); waitText(headings[1])
-            compose.onNodeWithText("下一章 ›").performClick(); waitText(headings[2])
-            compose.onNodeWithText("‹ 上一章").performClick(); waitText(headings[1])
+            compose.onNodeWithText("目录").performClick(); waitText("目录 · 3 章")
+            compose.onNodeWithText(headings[1]).performClick()
+            // The modal drawer remains composed offscreen. Wait for its closing animation
+            // and target chapter DOM before using the reader's identically labeled controls.
+            compose.waitForIdle()
+            waitJs(s, "document.getElementById('content')?.textContent.includes('章节2')")
+            compose.onNode(hasText("下一章 ›") and hasAnyAncestor(hasTestTag("BookReaderBackground"))).performClick(); waitText(headings[2])
+            compose.onNode(hasText("‹ 上一章") and hasAnyAncestor(hasTestTag("BookReaderBackground"))).performClick(); waitText(headings[1])
             waitJs(s, "document.getElementById('content')?.textContent.includes('章节2')")
             // Let initial layout restoration finish before simulating reading.
             compose.waitUntil(10_000) { nativeRatio(s) >= 0f }
@@ -230,9 +234,9 @@ class V2ReaderIntegrationTest {
             select("终端"); waitJs(s, "document.documentElement.dataset.theme==='terminal'"); waitRatio(s, .45f)
             s.recreate(); waitText(headings[1]); waitRatio(s, .45f)
             compose.onNodeWithText("‹ 书架").performClick(); waitText("书架")
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("读到", substring=true)).fetchSemanticsNodes().isNotEmpty() }
-            waitText("v2-gbk-novel.txt")
-            compose.onNodeWithText("v2-gbk-novel.txt").performClick(); waitText(headings[1]); waitRatio(s, .45f)
+            val shelfTitle = BookTitles.display(row).title
+            waitText(shelfTitle)
+            compose.onNodeWithText(shelfTitle).performClick(); waitText(headings[1]); waitRatio(s, .45f)
         }
         launch(uri).use { s -> waitText(headings[1]); waitRatio(s, .45f) }
     }

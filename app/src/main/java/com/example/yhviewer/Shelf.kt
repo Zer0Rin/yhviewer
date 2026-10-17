@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.Flow
  *
  * v2 新增：locator（阅读位置，见 Locator）、progress（全书进度 0..1，书架显示用）。
  * v3 新增：permissions（每份文档自己的权限，见 DocPermissions）。
+ * v4 新增：作者、封面检查标记、分组、内容分类及 shelf_groups 表。
  * 新增枚举值 CODE / TXT / EPUB 不需要迁移：type 按名字存成 TEXT。
  */
 @Entity(
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
     indices = [
         Index(value = ["sourceUri"], unique = true),
         Index(value = ["lastOpenedAt"]),
+        Index(value = ["groupId"]),
     ],
 )
 data class Book(
@@ -46,6 +48,14 @@ data class Book(
     @ColumnInfo(defaultValue = "0") val progress: Float = 0f,
     // v3：这份文档的权限（DocPermissions 位标记）。默认 1 = "标准"档，老文档升级后行为不变
     @ColumnInfo(defaultValue = "1") val permissions: Int = DocPermissions.STANDARD.toBits(),
+    // v4：作者（EPUB 从 OPF 读；TXT 为 null，显示时从文件名解析）
+    val author: String? = null,
+    // v4：EPUB 是否已尝试提取封面。false 的书在启动时补做一次（升级前导入的书）
+    @ColumnInfo(defaultValue = "0") val coverChecked: Boolean = false,
+    // v4：所属分组；null = 未分组。删除分组时置回 null
+    val groupId: Long? = null,
+    // v4：ContentKind.id；null = 还没分类（升级前导入的），启动时补
+    val kind: String? = null,
 )
 
 @Dao
@@ -55,7 +65,8 @@ interface BookDao {
     @Query(
         """
         SELECT * FROM books
-        WHERE (:pattern = '' OR name LIKE '%' || :pattern || '%' ESCAPE '\')
+        WHERE (:pattern = '' OR name LIKE '%' || :pattern || '%' ESCAPE '\'
+               OR author LIKE '%' || :pattern || '%' ESCAPE '\')
           AND (:favoritesOnly = 0 OR favorite = 1)
         ORDER BY lastOpenedAt DESC
         """
@@ -93,8 +104,38 @@ interface BookDao {
     @Query("UPDATE books SET permissions = :bits WHERE id = :id")
     suspend fun setPermissions(id: Long, bits: Int)
 
-    @Query("UPDATE books SET localFile = :file, sizeBytes = :size WHERE id = :id")
-    suspend fun updateContent(id: Long, file: String, size: Long): Int
+    @Query("UPDATE books SET localFile = :file, sizeBytes = :size, kind = :kind WHERE id = :id")
+    suspend fun updateContent(id: Long, file: String, size: Long, kind: String): Int
+
+    /** 升级前导入、还没提取过封面的 EPUB */
+    @Query("SELECT * FROM books WHERE type = 'EPUB' AND coverChecked = 0")
+    suspend fun epubsWithoutCoverCheck(): List<Book>
+
+    @Query("UPDATE books SET author = :author, coverChecked = 1 WHERE id = :id")
+    suspend fun setBookMeta(id: Long, author: String?)
+
+    @Query("SELECT id FROM books")
+    suspend fun allIds(): List<Long>
+
+    // ---- v4：分组、批量操作、内容分类 ----
+
+    @Query("UPDATE books SET groupId = :groupId WHERE id IN (:ids)")
+    suspend fun moveToGroup(ids: List<Long>, groupId: Long?)
+
+    @Query("UPDATE books SET groupId = NULL WHERE groupId = :groupId")
+    suspend fun ungroup(groupId: Long)
+
+    @Query("UPDATE books SET favorite = :favorite WHERE id IN (:ids)")
+    suspend fun setFavorite(ids: List<Long>, favorite: Boolean)
+
+    @Query("SELECT * FROM books WHERE id IN (:ids)")
+    suspend fun getAll(ids: List<Long>): List<Book>
+
+    @Query("UPDATE books SET kind = :kind WHERE id = :id")
+    suspend fun setKind(id: Long, kind: String)
+
+    @Query("SELECT * FROM books WHERE kind IS NULL")
+    suspend fun withoutKind(): List<Book>
 
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: Long)
@@ -115,9 +156,30 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-@Database(entities = [Book::class], version = 3, exportSchema = true)
+/**
+ * v3 → v4：作者、封面标记、分组、内容分类。
+ * 老数据：coverChecked = 0、kind = NULL → 启动时补封面和分类；groupId = NULL → 都在"未分组"。
+ * 建表和建索引的 SQL 必须和 Room 导出的 schemas/…/4.json 完全一致，编译后对照一次。
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE books ADD COLUMN author TEXT")
+        db.execSQL("ALTER TABLE books ADD COLUMN coverChecked INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE books ADD COLUMN groupId INTEGER")
+        db.execSQL("ALTER TABLE books ADD COLUMN kind TEXT")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_books_groupId` ON `books` (`groupId`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `shelf_groups` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_shelf_groups_name` ON `shelf_groups` (`name`)")
+    }
+}
+
+@Database(entities = [Book::class, ShelfGroup::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
+    abstract fun groupDao(): GroupDao
 
     companion object {
         @Volatile
@@ -126,7 +188,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "shelf.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
