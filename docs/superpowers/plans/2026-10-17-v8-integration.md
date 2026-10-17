@@ -11,3 +11,9 @@ User authorizes applying supplied patch on codex/v7-shelf-reader at 2a64d95, com
 - [ ] Record verification, commit, push, create/attach PR, wait for CI, merge main.
 
 Reference: /Users/guyue/Downloads/INTEGRATION-7.md. Independent source review and acceptance fixture work delegated under subagent-driven-development skill.
+
+## Validation follow-up
+
+- Initial API34 full CI39017645086: Strict118/119 and Standard127/128. Only new bottom-corner native pixel assertion failed; Python suite passed remotely.
+- LocalAPI37 Standard full128:120passed, seven Python startup timeouts and one IME/back sequencing failure; all11 v8 scenarios passed. Investigate in isolation; no production timeout relaxation.
+- [x] Restore full device runner from build/verification-v05/run-device-tests-full.sh after temporary diagnostic commit8764288 (CI39019093531). Require full CI before PR/merge.

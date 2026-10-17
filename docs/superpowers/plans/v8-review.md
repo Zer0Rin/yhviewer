@@ -21,3 +21,11 @@ This reviewer did not run builds, tests, screenshot capture, emulator commands o
 ## Verdict
 
 Approve the reviewed source repairs. No outstanding actionable review finding remains. Release and merge completion remain conditional on the integrating agent's required verification evidence.
+
+## Final test and CI follow-up
+
+Inspected test/CI changes against `df437ca`. The navigation pixel probe now filters the shelf to an empty result and explicitly shows system bars before sampling, avoiding cover-shadow contamination on hardware-key profiles without navigation insets. It retains exact RGB equality, the original 15-second wait, all three themes, shelf/Markdown coverage and icon assertions; failure diagnostics add inset, window and pixel evidence. CI requests software navigation with `qemu.hw.mainkeys=0`.
+
+`scripts/run-device-tests.sh` has no final diff against `df437ca`: both complete Strict and Standard instrumentation suites run without class/method filters, and any failed suite preserves a failing exit status. Python changes add bounded diagnostic logging only; assertions and startup, execution and harness deadlines remain unchanged. No hidden test weakening or residual suite filter was identified.
+
+The integrating agent reports that the same API37/WebView `145.0.7632.218` startup timeout occurs with the old `2a64d95` APK (61.626s) and current APK (61.971s), both without output/messages; isolated shelf acceptance and remote full Python tests pass. This supports a pre-existing environment/runtime limitation rather than a v8 source regression, without establishing its root cause. This reviewer inspected source only and did not independently run those checks. Final suite outcomes remain the integrating agent's responsibility.

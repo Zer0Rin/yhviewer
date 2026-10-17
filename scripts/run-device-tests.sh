@@ -24,7 +24,7 @@ for yh_test_flavor in Strict Standard; do
   adb -s "$yh_test_serial" shell input keyevent 224
   adb -s "$yh_test_serial" shell locksettings set-disabled true
   adb -s "$yh_test_serial" shell wm dismiss-keyguard
-  if ./gradlew ":app:connected${yh_test_flavor}DebugAndroidTest" -Pandroid.testInstrumentationRunnerArguments.class=com.example.yhviewer.V8AcceptanceTest\#navigationBarBackgroundMatchesThemeInCurrentNavigationMode --no-configuration-cache --stacktrace; then
+  if ./gradlew ":app:connected${yh_test_flavor}DebugAndroidTest" --no-configuration-cache --stacktrace; then
     continue
   fi
   yh_test_result=1

@@ -364,6 +364,15 @@ class V8AcceptanceTest {
         }
         launch().use { scenario ->
             waitText("书架")
+            // Sample an empty filtered shelf so bottom-edge book shadows cannot alter the
+            // exact background pixel on hardware-key profiles with no navigation inset.
+            val probeQuery = "v8-navigation-background-probe-no-match"
+            vm(scenario) { it.updateQuery(probeQuery) }
+            waitText("没有匹配「$probeQuery」的内容")
+            scenario.onActivity { activity ->
+                WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
             for ((theme, palette) in listOf(
                 ReaderTheme.PAPER to ReaderPalette.PAPER,
                 ReaderTheme.INK to ReaderPalette.INK,
