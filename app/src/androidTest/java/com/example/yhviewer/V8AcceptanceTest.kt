@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
@@ -412,9 +413,41 @@ class V8AcceptanceTest {
             capture("shelf-ink.png")
             compose.onNode(hasText("山海来信") and hasClickAction()).performTouchInput { longClick() }
             waitText("已选 1 项")
-            // The other three books occupy one row below the continue-reading hero.
-            for (title in bookTitles.take(2)) {
-                compose.onNode(hasText(title) and hasClickAction()).performScrollTo().performClick()
+            // The capsule overlays the LazyColumn. performScrollTo() alone does not know
+            // about that sibling overlay, especially on short displays with soft navigation.
+            var clearancePx = 0f
+            scenario.onActivity { clearancePx = 32f * it.resources.displayMetrics.density }
+            val shelfList = compose.onNode(hasScrollToIndexAction() and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            for ((index, title) in bookTitles.take(2).withIndex()) {
+                val target = compose.onNode(hasText(title) and hasClickAction())
+                target.performScrollTo()
+                compose.waitForIdle()
+                repeat(4) {
+                    val targetBounds = target.fetchSemanticsNode().boundsInRoot
+                    val barBounds = compose.onNodeWithText("移到分组").fetchSemanticsNode().boundsInRoot
+                    val safeCenterY = barBounds.top - clearancePx
+                    val scrollNeeded = targetBounds.center.y - safeCenterY
+                    if (scrollNeeded > 0f) {
+                        shelfList.performSemanticsAction(SemanticsActions.ScrollBy) { scrollBy ->
+                            scrollBy(0f, scrollNeeded + 1f)
+                        }
+                        compose.waitForIdle()
+                    }
+                }
+                val targetBounds = target.fetchSemanticsNode().boundsInRoot
+                val barBounds = compose.onNodeWithText("移到分组").fetchSemanticsNode().boundsInRoot
+                val listBounds = shelfList.fetchSemanticsNode().boundsInRoot
+                val diagnostic = "title=$title target=$targetBounds moveAction=$barBounds " +
+                    "list=$listBounds clearancePx=$clearancePx"
+                assertTrue("Shelf selection target must retain positive bounds: $diagnostic",
+                    targetBounds.width > 0f && targetBounds.height > 0f)
+                assertTrue("Shelf selection click center must clear the floating capsule: $diagnostic",
+                    targetBounds.center.y <= barBounds.top - clearancePx)
+                assertTrue("Shelf selection click center must remain inside the list: $diagnostic",
+                    targetBounds.center.y >= listBounds.top && targetBounds.center.y <= listBounds.bottom)
+                target.assertIsDisplayed().performClick()
+                waitText("已选 ${index + 2} 项")
             }
             waitText("已选 3 项")
             compose.onNodeWithText("移到分组").assertIsDisplayed()
