@@ -38,10 +38,10 @@ import androidx.compose.ui.unit.dp
  *
  *   DotRule / DotProgress  ← Lattice："一切由点构成"。输入框底线和进度条是一排点
  *   Modifier.pressScale     ← Lens：按下轻微下沉，松手弹回（不晃动、不持续动画）
- *   FloatingCapsule         ← Lens：浮在内容上的胶囊操作栏，半透明底 + 细线 + 柔和投影
+ *   FloatingCapsule         ← Lens：浮在内容上的胶囊操作栏，不透明底 + 细线 + 柔和投影
  *
  * 只用 Compose 自带 API，没有新依赖。真正的"背景模糊"在 Compose 里要么需要第三方库，
- * 要么拿不到 WebView 的像素（阅读页正文是 WebView），所以胶囊用 94% 不透明的底色代替。
+ * 要么拿不到 WebView 的像素（阅读页正文是 WebView），所以胶囊使用不透明的主题底色。
  */
 
 // ======================= 点线（Lattice） =======================
@@ -142,7 +142,7 @@ fun FloatingCapsule(modifier: Modifier = Modifier, content: @Composable RowScope
             Modifier
                 .fillMaxWidth()
                 .shadow(elevation = 12.dp, shape = PillShape, ambientColor = yh.shadow, spotColor = yh.shadow)
-                .background(yh.surface.copy(alpha = 0.94f), PillShape)
+                .background(yh.surface, PillShape)
                 .border(1.dp, yh.lineSoft, PillShape)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
