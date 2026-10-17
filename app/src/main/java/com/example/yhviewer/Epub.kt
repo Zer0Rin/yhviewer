@@ -30,7 +30,13 @@ import javax.xml.parsers.DocumentBuilderFactory
 class EpubFormatException(message: String) : IOException(message)
 
 data class EpubChapter(val title: String, val path: String) // path：相对书根目录，用 "/" 分隔
-data class EpubBook(val title: String?, val chapters: List<EpubChapter>)
+// v7: metadata is optional; the repository validates/decodes the declared bitmap separately.
+data class EpubBook(
+    val title: String?,
+    val chapters: List<EpubChapter>,
+    val author: String? = null,
+    val coverPath: String? = null,
+)
 
 object SafeUnzip {
 
@@ -128,6 +134,10 @@ object EpubParser {
 
         val title = opf.byName("title").firstOrNull()?.textContent?.trim()?.ifBlank { null }
 
+        val author = opf.byName("creator").firstOrNull()?.textContent
+            ?.replace(Regex("\\s+"), " ")?.trim()?.ifBlank { null }?.take(80)
+        val coverPath = findCover(root, opf, manifest)
+
         // 目录标题：EPUB3 的 nav 文档优先，其次 EPUB2 的 NCX；都解析不了就用"第 N 节"
         // Optional TOC syntax may fall back, but unsafe entity declarations must never be swallowed.
         manifest.values.filter { "nav" in it.properties.split(' ') || it.mediaType == "application/x-dtbncx+xml" }
@@ -139,7 +149,29 @@ object EpubParser {
         val chapters = spine.mapIndexed { i, item ->
             EpubChapter(tocTitles[item.href] ?: "第 ${i + 1} 节", item.href)
         }
-        return EpubBook(title, chapters)
+        return EpubBook(title, chapters, author, coverPath)
+    }
+
+    private val IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+
+    // v7: EPUB3 declaration, EPUB2 declaration, then an existing bitmap named cover.
+    // Canonical containment also rejects symlinks in previously extracted book directories.
+    private fun findCover(root: File, opf: Document, manifest: Map<String, Item>): String? {
+        val canonicalRoot = root.canonicalFile
+        fun usable(item: Item?): Boolean {
+            if (item == null || item.mediaType.lowercase() !in IMAGE_TYPES) return false
+            val file = File(root, item.href).canonicalFile
+            return file.path.startsWith(canonicalRoot.path + File.separator) && file.isFile
+        }
+        manifest.values.firstOrNull { "cover-image" in it.properties.split(Regex("\\s+")) && usable(it) }
+            ?.let { return it.href }
+        val metaId = opf.byName("meta").firstOrNull { it.getAttribute("name") == "cover" }
+            ?.getAttribute("content")
+        metaId?.let { manifest[it] }?.takeIf(::usable)?.let { return it.href }
+        return manifest.entries.firstOrNull { (id, item) ->
+            usable(item) && (id.contains("cover", ignoreCase = true) ||
+                item.href.substringAfterLast('/').contains("cover", ignoreCase = true))
+        }?.value?.href
     }
 
     private fun navTitles(root: File, items: Collection<Item>): Map<String, String>? {

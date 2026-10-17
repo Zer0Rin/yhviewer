@@ -17,7 +17,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
-import com.example.yhviewer.ui.theme.YHViewerTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -30,7 +29,7 @@ class MainActivity : ComponentActivity() {
             extractUri(intent)?.let(vm::importAndOpen)
         }
         setContent {
-            YHViewerTheme { AppRoot(vm) }
+            YHTheme { AppRoot(vm) }
         }
     }
 

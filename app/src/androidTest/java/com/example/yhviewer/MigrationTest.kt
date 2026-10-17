@@ -57,6 +57,34 @@ class MigrationTest {
     @Test
     fun migrateAllTheWayFrom1() {
         helper.createDatabase(dbName, 1).apply { execSQL(insertV1); close() }
-        helper.runMigrationsAndValidate(dbName, 3, true, MIGRATION_1_2, MIGRATION_2_3).close()
+        helper.runMigrationsAndValidate(dbName, 4, true, MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).close()
     }
+    @Test
+    fun migrate3To4PreservesMetadataAndAddsUnclassifiedUngroupedDefaults() {
+        helper.createDatabase(dbName, 3).apply {
+            execSQL(insertV1)
+            execSQL("UPDATE books SET locator = '2:0.5000', progress = 0.5, permissions = 3")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 4, true, MIGRATION_3_4)
+        db.query("SELECT name, favorite, locator, progress, permissions, author, coverChecked, groupId, kind FROM books").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("a.html", c.getString(0))
+            assertEquals(1, c.getInt(1))
+            assertEquals("2:0.5000", c.getString(2))
+            assertEquals(0.5f, c.getFloat(3), 0f)
+            assertEquals(3, c.getInt(4))
+            assertTrue(c.isNull(5))
+            assertEquals(0, c.getInt(6))
+            assertTrue(c.isNull(7))
+            assertTrue(c.isNull(8))
+        }
+        db.execSQL("INSERT INTO shelf_groups(name, createdAt) VALUES ('工作', 1)")
+        db.query("SELECT name FROM shelf_groups").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("工作", c.getString(0))
+        }
+        db.close()
+    }
+
 }

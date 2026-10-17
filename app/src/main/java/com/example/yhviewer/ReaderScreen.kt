@@ -1,26 +1,27 @@
 package com.example.yhviewer
 
 import android.app.Activity
+import androidx.compose.foundation.background
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -45,9 +46,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,7 +68,8 @@ fun ReaderScreen(vm: ShelfViewModel) {
     val state = vm.reader
     val doc = (state as? ReaderState.Ready)?.doc
     if (doc is OpenedDoc.Txt || doc is OpenedDoc.Epub) {
-        BookReader(vm, doc)
+        val palette = rememberReaderPalette(vm.theme)
+        ReaderChromeTheme(palette) { BookReader(vm, doc, palette) }
     } else {
         PageReader(vm, state)
     }
@@ -172,13 +174,15 @@ private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: M
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc) {
+private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalette) {
     val titles = chapterTitles(doc)
     var barsVisible by remember { mutableStateOf(true) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var tocOpen by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
-    ImmersiveSystemBars(hidden = !barsVisible)
+    ImmersiveSystemBars(hidden = !barsVisible, darkIcons = !palette.dark)
     KeepScreenOn(vm.reading.keepScreenOn)
 
     val gestures = ReaderGestures(
@@ -188,44 +192,62 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc) {
         onReachStart = vm::prevChapterFromStart,
     )
 
-    Box(Modifier.fillMaxSize()) {
-        // 正文铺满全屏；只避开刘海挖孔。不随状态栏显隐改变内边距，否则正文会跳动
-        BookContent(
-            vm = vm,
-            doc = doc,
-            gestures = gestures,
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout),
-        )
-
-        AnimatedVisibility(
-            visible = barsVisible,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
-        ) {
-            TopAppBar(
-                title = { Text(titles.getOrNull(vm.chapter) ?: doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
-                actions = {
-                    if (titles.size > 1) TextButton(onClick = { tocOpen = true }) { Text("目录") }
-                    TextButton(onClick = { settingsOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读设置" }) { Text("Aa") }
-                },
-            )
-        }
-
-        AnimatedVisibility(
-            visible = barsVisible,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            ChapterBar(
-                index = vm.chapter,
-                count = titles.size,
+    // v7: keep edge gestures for page turning/system back until explicitly opened.
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen,
+        drawerContent = {
+            ChapterDrawerContent(
+                drawerState = drawerState,
+                bookTitle = doc.name,
+                titles = titles,
+                current = vm.chapter,
+                onPick = { vm.goToChapter(it); scope.launch { drawerState.close() } },
                 onPrev = vm::prevChapter,
                 onNext = vm::nextChapter,
             )
+        },
+    ) {
+        Box(Modifier.fillMaxSize().background(Color(palette.bg)).testTag("BookReaderBackground")) {
+            // 正文铺满全屏；只避开刘海挖孔。不随状态栏显隐改变内边距，否则正文会跳动
+            BookContent(
+                vm = vm,
+                doc = doc,
+                gestures = gestures,
+                modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout),
+            )
+
+            AnimatedVisibility(
+                visible = barsVisible,
+                enter = slideInVertically { -it } + fadeIn(),
+                exit = slideOutVertically { -it } + fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                TopAppBar(
+                    title = { Text(titles.getOrNull(vm.chapter) ?: doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
+                    actions = {
+                        if (titles.size > 1) TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
+                        TextButton(onClick = { settingsOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读设置" }) { Text("Aa") }
+                    },
+                )
+            }
+
+            AnimatedVisibility(
+                visible = barsVisible,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                ChapterBar(
+                    index = vm.chapter,
+                    count = titles.size,
+                    onPrev = vm::prevChapter,
+                    onNext = vm::nextChapter,
+                )
+            }
         }
+
     }
 
     if (settingsOpen) {
@@ -238,15 +260,6 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc) {
             chapterCount = titles.size,
             onChapter = { vm.goToChapter(it) },
             onDismiss = { settingsOpen = false },
-        )
-    }
-
-    if (tocOpen && titles.isNotEmpty()) {
-        TocDialog(
-            titles = titles,
-            current = vm.chapter,
-            onPick = { vm.goToChapter(it); tocOpen = false },
-            onDismiss = { tocOpen = false },
         )
     }
 }
@@ -298,7 +311,7 @@ private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGest
 
 /** 隐藏 / 恢复系统状态栏和导航栏；离开阅读页时一定恢复 */
 @Composable
-private fun ImmersiveSystemBars(hidden: Boolean) {
+private fun ImmersiveSystemBars(hidden: Boolean, darkIcons: Boolean) {
     val view = LocalView.current
     val window = (LocalContext.current as? Activity)?.window ?: return
     val controller = remember(window, view) { WindowCompat.getInsetsController(window, view) }
@@ -307,13 +320,19 @@ private fun ImmersiveSystemBars(hidden: Boolean) {
         val statusVisible = insets?.isVisible(WindowInsetsCompat.Type.statusBars()) ?: true
         val navVisible = insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) ?: true
         val behavior = controller.systemBarsBehavior
+        val previousStatusAppearance = controller.isAppearanceLightStatusBars
+        val previousNavAppearance = controller.isAppearanceLightNavigationBars
         onDispose {
             controller.systemBarsBehavior = behavior
+            controller.isAppearanceLightStatusBars = previousStatusAppearance
+            controller.isAppearanceLightNavigationBars = previousNavAppearance
             if (statusVisible) controller.show(WindowInsetsCompat.Type.statusBars()) else controller.hide(WindowInsetsCompat.Type.statusBars())
             if (navVisible) controller.show(WindowInsetsCompat.Type.navigationBars()) else controller.hide(WindowInsetsCompat.Type.navigationBars())
         }
     }
-    LaunchedEffect(hidden, controller) {
+    LaunchedEffect(hidden, darkIcons, controller) {
+        controller.isAppearanceLightStatusBars = darkIcons
+        controller.isAppearanceLightNavigationBars = darkIcons
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (hidden) controller.hide(WindowInsetsCompat.Type.systemBars()) else controller.show(WindowInsetsCompat.Type.systemBars())
     }
@@ -349,31 +368,4 @@ private fun ChapterBar(index: Int, count: Int, onPrev: () -> Unit, onNext: () ->
             TextButton(onClick = onNext, enabled = index < count - 1) { Text("下一章 ›") }
         }
     }
-}
-
-@Composable
-private fun TocDialog(titles: List<String>, current: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("目录（${titles.size} 章）") },
-        text = {
-            LazyColumn(state = listState, modifier = Modifier.heightIn(max = 480.dp)) {
-                itemsIndexed(titles) { i, t ->
-                    Text(
-                        t,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(i) }
-                            .padding(vertical = 10.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontWeight = if (i == current) FontWeight.Bold else FontWeight.Normal,
-                        color = if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
 }

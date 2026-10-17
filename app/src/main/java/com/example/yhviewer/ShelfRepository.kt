@@ -3,6 +3,7 @@ package com.example.yhviewer
 import android.content.Context
 import android.net.Uri
 import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -65,8 +66,10 @@ class ShelfRepository(
     private val dir: File = File(context.filesDir, "shelf"),
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val tmpDir: File = context.cacheDir,
+    val covers: CoverStore = CoverStore(File(context.filesDir, "covers")),
 ) {
     private val dao = db.bookDao()
+    private val groupDao = db.groupDao()
 
     fun observe(query: String, favoritesOnly: Boolean): Flow<List<Book>> =
         dao.observe(escapeLike(query.trim()), favoritesOnly)
@@ -79,12 +82,16 @@ class ShelfRepository(
     private suspend fun importText(uri: Uri, source: DocumentLoader.Source): Long {
         val max = if (source.type == DocType.TXT) DocumentLoader.MAX_TXT_BYTES else DocumentLoader.MAX_TEXT_BYTES
         // 编码识别只在导入时做一次，副本统一存成 UTF-8，之后打开不用再猜
-        val bytes = DocumentLoader.readText(context, uri, max).toByteArray(Charsets.UTF_8)
+        val text = DocumentLoader.readText(context, uri, max)
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        val kind = ContentClassifier.classify(source.name, source.type, bytes.size.toLong(), text)
         val fileName = UUID.randomUUID().toString()
         val target = File(dir, fileName)
         try {
             withContext(Dispatchers.IO) { writeAtomically(target, bytes) }
-            return commit(uri.toString(), source.name, source.type, fileName, bytes.size.toLong())
+            val id = commit(uri.toString(), source.name, source.type, fileName, bytes.size.toLong(), kind, BookTitles.parse(source.name).author)
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { covers.delete(id) } }
+            return id
         } catch (e: Exception) {
             discardUnreferenced(fileName)
             throw e
@@ -103,7 +110,9 @@ class ShelfRepository(
             }
             val target = File(dir, fileName)
             if (!staging.renameTo(target)) throw IOException("保存 EPUB 失败")
-            return commit(uri.toString(), book.title ?: source.name, DocType.EPUB, fileName, size)
+            val id = commit(uri.toString(), book.title ?: source.name, DocType.EPUB, fileName, size, ContentKind.EBOOK, book.author)
+            saveBookMeta(id, target, book)
+            return id
         } catch (e: Exception) {
             withContext(NonCancellable + Dispatchers.IO) { staging.deleteRecursively() }
             discardUnreferenced(fileName)
@@ -114,7 +123,7 @@ class ShelfRepository(
     }
 
     /** 新副本已经写好，这里只改数据库；成功后删除旧副本 */
-    private suspend fun commit(key: String, name: String, type: DocType, fileName: String, size: Long): Long {
+    private suspend fun commit(key: String, name: String, type: DocType, fileName: String, size: Long, kind: ContentKind, author: String?): Long {
         var oldFile: String? = null
         val id = try {
             db.withTransaction {
@@ -125,6 +134,7 @@ class ShelfRepository(
                     dao.update(
                         existing.copy(
                             name = name, type = type, localFile = fileName, sizeBytes = size, lastOpenedAt = now,
+                            kind = kind.id, author = author, coverChecked = type != DocType.EPUB,
                             // 类型变了（极少见）就从头读；否则保留阅读位置
                             locator = if (existing.type == type) existing.locator else null,
                             progress = if (existing.type == type) existing.progress else 0f,
@@ -136,6 +146,7 @@ class ShelfRepository(
                         Book(
                             sourceUri = key, name = name, type = type, localFile = fileName,
                             sizeBytes = size, addedAt = now, lastOpenedAt = now,
+                            kind = kind.id, author = author, coverChecked = type != DocType.EPUB,
                         )
                     )
                 }
@@ -148,6 +159,111 @@ class ShelfRepository(
             withContext(NonCancellable + Dispatchers.IO) { File(dir, old).deleteRecursively() }
         }
         return id
+    }
+
+    /** 生成封面（没有就删掉旧的）并记下作者；重新导入同一本书时也走这里，旧封面会被替换 */
+    private suspend fun saveBookMeta(id: Long, root: File, book: EpubBook) {
+        try {
+            withContext(Dispatchers.IO) {
+                val ok = book.coverPath?.let { covers.generate(id, File(root, it)) } ?: false
+                if (!ok) covers.delete(id)
+            }
+            dao.setBookMeta(id, book.author)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The row and original content are already committed. Retry metadata at startup.
+        }
+    }
+
+    /**
+     * 给升级前导入的 EPUB 补封面和作者。每本只做一次（coverChecked），
+     * 解析失败的书也标记掉，不会每次启动都重试。启动清理之后在后台调用。
+     */
+    suspend fun backfillCovers(): Int = storageLock.withLock {
+        var done = 0
+        for (b in dao.epubsWithoutCoverCheck()) {
+            val root = File(dir, b.localFile)
+            val parsed = withContext(Dispatchers.IO) { runCatching { EpubParser.parse(root) }.getOrNull() }
+            if (parsed != null) {
+                saveBookMeta(b.id, root, parsed)
+                if (covers.exists(b.id)) done++
+            } else {
+                withContext(Dispatchers.IO) { covers.delete(b.id) }
+                dao.setBookMeta(b.id, null)
+            }
+        }
+        done
+    }
+
+    /** 给升级前导入的文档补内容分类；读不到文件的标成纯文本，不会每次启动都重试 */
+    suspend fun backfillKinds(): Int = storageLock.withLock {
+        val todo = dao.withoutKind()
+        for (b in todo) {
+            val kind = withContext(Dispatchers.IO) {
+                if (b.type == DocType.EPUB) return@withContext ContentKind.EBOOK
+                val sample = runCatching {
+                    File(dir, b.localFile).bufferedReader(Charsets.UTF_8).use { r ->
+                        val buf = CharArray(ContentClassifier.SAMPLE_CHARS)
+                        val n = r.read(buf)
+                        if (n <= 0) "" else String(buf, 0, n)
+                    }
+                }.getOrDefault("")
+                ContentClassifier.classify(b.name, b.type, b.sizeBytes, sample)
+            }
+            dao.setKind(b.id, kind.id)
+        }
+        todo.size
+    }
+
+    // ---------------- 分组（v7） ----------------
+
+    fun observeGroups(): Flow<List<ShelfGroup>> = groupDao.observe()
+
+    /** 校验失败抛 IllegalArgumentException，message 直接给用户看 */
+    suspend fun createGroup(rawName: String): Long = db.withTransaction {
+        createGroupInTransaction(rawName)
+    }
+
+    private suspend fun createGroupInTransaction(rawName: String): Long {
+        GroupNames.validate(rawName, groupDao.all())?.let { throw IllegalArgumentException(it) }
+        return groupDao.insert(ShelfGroup(name = GroupNames.normalize(rawName), createdAt = clock()))
+    }
+
+    suspend fun createGroupAndMove(rawName: String, ids: Collection<Long>): Long = db.withTransaction {
+        val id = createGroupInTransaction(rawName)
+        ids.distinct().chunked(SQL_BATCH_SIZE).forEach { dao.moveToGroup(it, id) }
+        id
+    }
+
+    suspend fun renameGroup(id: Long, rawName: String) = db.withTransaction {
+        val groups = groupDao.all()
+        require(groups.any { it.id == id }) { "分组已不存在" }
+        GroupNames.validate(rawName, groups, renamingId = id)?.let { throw IllegalArgumentException(it) }
+        groupDao.rename(id, GroupNames.normalize(rawName))
+    }
+
+    /** 删除分组：成员回到"未分组"，文件和阅读记录都不动。同一个事务，不会出现指向已删分组的记录 */
+    suspend fun deleteGroup(id: Long) {
+        db.withTransaction {
+            dao.ungroup(id)
+            groupDao.delete(id)
+        }
+    }
+
+    /** groupId = null：移出分组 */
+    suspend fun moveToGroup(ids: Collection<Long>, groupId: Long?) = db.withTransaction {
+        require(groupId == null || groupDao.all().any { it.id == groupId }) { "分组已不存在" }
+        ids.distinct().chunked(SQL_BATCH_SIZE).forEach { dao.moveToGroup(it, groupId) }
+    }
+
+    suspend fun setFavorite(ids: Collection<Long>, favorite: Boolean) = db.withTransaction {
+        ids.distinct().chunked(SQL_BATCH_SIZE).forEach { dao.setFavorite(it, favorite) }
+    }
+
+    /** 批量删除：逐个走 delete()，保证每本书的副本和封面都被清理 */
+    suspend fun deleteMany(ids: Collection<Long>) {
+        ids.forEach { delete(it) }
     }
 
     suspend fun open(id: Long): OpenedDoc {
@@ -192,7 +308,7 @@ class ShelfRepository(
         try {
             withContext(Dispatchers.IO) { writeAtomically(File(dir, fileName), bytes) }
             db.withTransaction {
-                if (dao.updateContent(id, fileName, bytes.size.toLong()) != 1) {
+                if (dao.updateContent(id, fileName, bytes.size.toLong(), ContentClassifier.classify(book.name, book.type, bytes.size.toLong(), text).id) != 1) {
                     throw IOException("书架里没有这个文档")
                 }
             }
@@ -216,7 +332,10 @@ class ShelfRepository(
     suspend fun delete(id: Long) = storageLock.withLock {
         val book = dao.get(id) ?: return@withLock
         dao.delete(id)
-        withContext(Dispatchers.IO) { File(dir, book.localFile).deleteRecursively() }
+        withContext(NonCancellable + Dispatchers.IO) {
+            File(dir, book.localFile).deleteRecursively()
+            covers.delete(id)
+        }
     }
 
     /**
@@ -225,10 +344,11 @@ class ShelfRepository(
      */
     suspend fun cleanOrphans(): Int = storageLock.withLock {
         val referenced = dao.allLocalFiles().toSet()
+        val ids = dao.allIds().toSet()
         withContext(Dispatchers.IO) {
             dir.listFiles().orEmpty()
                 .filter { it.name !in referenced }
-                .count { it.deleteRecursively() }
+                .count { it.deleteRecursively() } + covers.cleanOrphans(ids)
         }
     }
 
@@ -251,6 +371,7 @@ class ShelfRepository(
     private companion object {
         // Shared across repository instances so recreation cannot clean another import's staging files.
         val storageLock = Mutex()
+        const val SQL_BATCH_SIZE = 900
     }
 }
 

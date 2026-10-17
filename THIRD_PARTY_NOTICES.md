@@ -29,3 +29,19 @@ Full [Pyodide license](tools/pyodide/LICENSE.pyodide) and
 See [runtime reproduction and compatibility](tools/pyodide/README.md).
 Strict contains none of these Python runtime assets. Python packages are not
 downloaded at runtime.
+
+## Interface fonts
+
+- Bodoni Moda variable font, Google Fonts `ofl/bodonimoda`: SIL Open Font License 1.1.
+  Font: `app/src/main/res/font/bodoni_moda.ttf`; full license bundled in
+  `app/src/main/assets/fonts/licenses/BodoniModa-OFL.txt`.
+- Manrope variable font, Google Fonts `ofl/manrope`: SIL Open Font License 1.1.
+  Font: `app/src/main/res/font/manrope.ttf`; full license bundled in
+  `app/src/main/assets/fonts/licenses/Manrope-OFL.txt`.
+
+Unmodified upstream files are from https://github.com/google/fonts.
+
+| Font | SHA-256 |
+| --- | --- |
+| bodoni_moda.ttf | 550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf |
+| manrope.ttf | 3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6 |

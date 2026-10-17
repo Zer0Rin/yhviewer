@@ -54,7 +54,7 @@ class EditorRepositoryTest {
         root.deleteRecursively()
     }
 
-    private fun newRepository() = ShelfRepository(context, db, dir = shelf, clock = { 1000L })
+    private fun newRepository() = ShelfRepository(context, db, dir = shelf, clock = { 1000L }, covers = CoverStore(File(root, "covers")))
     private fun source(name: String, text: String): File = File(root, name).apply { writeText(text) }
     private suspend fun imported(name: String = "document.md"): Long = repo.import(Uri.fromFile(source(name, "original")))
     private fun copies() = shelf.listFiles().orEmpty().map { it.name }.toSet()
