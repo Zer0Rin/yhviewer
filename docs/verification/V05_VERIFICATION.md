@@ -36,7 +36,11 @@ Local API37 Standard full run executed 128 scenarios: 120 passed, seven Python e
 
 The next complete API34 run [39020042637](https://github.com/Zer0Rin/yhviewer/actions/runs/39020042637) passed the repaired navigation probe and again passed all Python tests. Strict118/119 and Standard127/128 now had only the generated-shelf selection scenario fail: on the short software-navigation viewport, automatic scroll-to placed the book click center behind the floating action capsule. Reproduced this exact failure locally at320×640/density160/three-button navigation (`small-screen-selection-red.log`). The test now scrolls the vertical shelf list until the target center clears the capsule by32dp, asserts positive/visible safe bounds, performs the actual click and checks counts2then3. The repaired small-screen scenario passed, including Activity recreation (`small-screen-selection-green.log`). No production change or assertion relaxation was needed. The emulator's original1080×2400/density420/gestural configuration was restored.
 
-Final complete CI results are recorded below when available.
+## Final CI and pull request
+
+The complete API34 CI [39032673408](https://github.com/Zer0Rin/yhviewer/actions/runs/39032673408) succeeded on source commit `34f42e344a1b548be3d07b3f44accfeae5b4a03c`. Both full edition suites ran without filters: Strict 119/119 and Standard 128/128, with zero failures/errors/skips in the exported instrumentation XML reports. The exported JVM reports confirm 188 tests per edition with zero failures/errors/skips. Final CI Lint reports have zero errors and 35 warnings per edition (the earlier local count above was 32). Build, APK permission checks and both emulator suites passed.
+
+[Pull request #4](https://github.com/Zer0Rin/yhviewer/pull/4) includes v7 and v8. Documentation-only follow-up records this verified source and evidence; its PR checks are required before merging. GitHub PR state is the authoritative merge record.
 
 ## Review
 
