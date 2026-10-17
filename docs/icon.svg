@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108">
+  <!-- YHViewer 图标 A（README / 商店用）。和 res/drawable 里的矢量图同一组路径 -->
+  <rect width="108" height="108" rx="24" fill="#262624"/>
+  <g transform="translate(54 54) scale(1.12) translate(-54 -54)" fill="none" stroke-linejoin="round">
+    <path d="M27 54 Q54 30 81 54 Q54 78 27 54 Z" stroke="#F0EEE6" stroke-width="4.5"/>
+    <path d="M43 45 L54 63 L65 45" stroke="#D97757" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>

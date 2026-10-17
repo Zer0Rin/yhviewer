@@ -120,9 +120,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          release_notes_path="docs/releases/$GITHUB_REF_NAME.md"
+          release_notes_args=(--generate-notes)
+          if [[ -f "$release_notes_path" ]]; then
+            release_notes_args=(--notes-file "$release_notes_path")
+          fi
           gh release create "$GITHUB_REF_NAME" "yhviewer-$RELEASE_VERSION-strict.apk" "yhviewer-$RELEASE_VERSION-standard.apk" SHA256SUMS.txt \
             --title "YHViewer $GITHUB_REF_NAME" \
-            --generate-notes \
+            "${release_notes_args[@]}" \
             --verify-tag
 
       - name: Clean up keystore

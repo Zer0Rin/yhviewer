@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 13+ 主题图标（单色）。系统只取 alpha，颜色跟随壁纸，所以这里统一用黑色。
+  图形和 ic_launcher_foreground.xml 完全一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.12"
+        android:scaleY="1.12">
+        <path
+            android:pathData="M27,54 Q54,30 81,54 Q54,78 27,54 Z"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="4.5"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M43,45 L54,63 L65,45"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
