@@ -560,6 +560,11 @@ private fun ContinueCard(vm: ShelfViewModel, book: Book, selected: Boolean?, onC
         Column(Modifier.weight(1f).heightIn(min = 150.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, color = yh.fg, maxLines = 3, overflow = TextOverflow.Ellipsis)
             author?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = yh.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Text(
+                "读到第 ${Locator.decode(book.locator).chapter.toLong() + 1} 章",
+                style = MaterialTheme.typography.bodySmall,
+                color = yh.muted,
+            )
             Spacer(Modifier.weight(1f))
             DotProgress(book.progress)
             Row(verticalAlignment = Alignment.CenterVertically) {

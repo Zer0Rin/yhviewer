@@ -508,6 +508,10 @@ class V8AcceptanceTest {
             waitText("Chapter 1: Crimson")
             waitForBookContent(scenario, "terminal", "rgb(29, 42, 50)", "The morning train")
             chapterAction("下一章 ›").assertIsDisplayed()
+            // Capture unobstructed chapter content after verifying the visible controls.
+            compose.onNodeWithTag("BookReaderBackground").performTouchInput { click(center) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Aa").fetchSemanticsNodes().isEmpty() }
+            compose.waitForIdle()
             capture("v4-terminal-reader.png")
         }
     }
@@ -539,6 +543,10 @@ class V8AcceptanceTest {
     }
 
     @Test fun continueReadingLongTitleRetainsItsButtonAtLargeFontScale() {
+        launch().use {
+            waitText("继续阅读 ›")
+            compose.onNodeWithText("读到第 13 章").assertIsDisplayed()
+        }
         val longTitle = "山海之间的漫长旅途与远方来信：写给每一个仍在路上的阅读者"
         runBlocking {
             val book = checkNotNull(db.bookDao().get(chinese))
@@ -555,6 +563,7 @@ class V8AcceptanceTest {
                 }
             }
             waitText("继续阅读 ›")
+            compose.onNodeWithText("读到第 13 章").performScrollTo().assertIsDisplayed()
             val button = compose.onNodeWithText("继续阅读 ›").performScrollTo().assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val card = compose.onNode(hasText(longTitle) and hasClickAction()).fetchSemanticsNode().boundsInRoot
             assertTrue("Continue-reading button cannot collapse below a long title", button.width > 0f && button.height > 0f)
