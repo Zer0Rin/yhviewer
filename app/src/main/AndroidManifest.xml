@@ -47,6 +47,16 @@
                 <data android:mimeType="application/json" />
                 <data android:mimeType="application/epub+zip" />
             </intent-filter>
+            <!-- v10：一次分享多个文件 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
         </activity>
     </application>
 

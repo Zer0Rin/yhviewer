@@ -41,3 +41,11 @@ Unmodified upstream files are from https://github.com/google/fonts.
 | Font | SHA-256 |
 | --- | --- |
 | manrope.ttf | 3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6 |
+
+## Markdown footnotes
+
+- markdown-it-footnote 4.0.0: MIT. Unmodified upstream browser bundle and license
+  from the official npm artifact `https://registry.npmjs.org/markdown-it-footnote/-/markdown-it-footnote-4.0.0.tgz`.
+  License: `app/src/main/assets/md/licenses/markdown-it-footnote-LICENSE.txt`.
+  Bundle: `app/src/main/assets/md/markdown-it-footnote.min.js`.
+  SHA-256: `d6fee58a3b56c5742fa18f3e01f1d317cc99975683ebd39c9195cb2aff0c2e42`.

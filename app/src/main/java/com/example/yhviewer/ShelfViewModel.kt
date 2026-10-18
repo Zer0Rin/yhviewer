@@ -178,6 +178,115 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     fun initialRatio(): Float = ratio
 
+    // ---------------- v10：多选导入、文件夹导入 ----------------
+
+    /** 正在导入时不为 null，书架底部显示进度 */
+    var importProgress by mutableStateOf<ImportProgress?>(null)
+        private set
+    /** 导入结束后的报告，用户关闭前一直显示 */
+    var importReport by mutableStateOf<ImportReport?>(null)
+        private set
+    private var importJob: Job? = null
+
+    fun dismissImportReport() { importReport = null }
+
+    /** 多选：只选了一个文件时和以前一样直接打开；多个文件留在书架，导入完显示报告 */
+    fun importMany(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        if (uris.size == 1) return importAndOpen(uris[0])
+        runImport { onProgress -> repo.importMany(uris, onProgress).first }
+    }
+
+    fun importFolder(treeUri: Uri) = runImport { onProgress -> repo.importFolder(treeUri, onProgress) }
+
+    private fun runImport(block: suspend ((ImportProgress) -> Unit) -> ImportReport) {
+        if (importJob?.isActive == true) return
+        importReport = null
+        importProgress = ImportProgress(0, 0, "")
+        importJob = viewModelScope.launch {
+            importReport = try {
+                startup.await()?.let { throw it }
+                // 进度回调可能来自 IO 线程：切回主线程再写 Compose 状态
+                block { p -> viewModelScope.launch { if (importJob?.isActive == true) importProgress = p } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ImportReport(0, listOf("导入" to (e.message ?: e.javaClass.simpleName)), emptyList())
+            } finally {
+                importProgress = null
+            }
+        }
+    }
+
+    // ---------------- v10：书签、跳转、搜索、阅读页提示 ----------------
+
+    /** 书签跳转到当前章时，章节号不变：用这个计数让阅读页以新的比例重建 WebView */
+    var jumpTick by mutableIntStateOf(0)
+        private set
+
+    /** 跳到指定章节和章内比例（书签、搜索结果） */
+    fun jumpTo(index: Int, r: Float) {
+        val doc = current() ?: return
+        if (index !in 0 until doc.chapterCount) return
+        chapterAnchor = null
+        chapter = index
+        ratio = if (r.isFinite()) r.coerceIn(0f, 1f) else 0f
+        jumpTick++
+        flushPosition()
+    }
+
+    fun bookmarks(bookId: Long) = repo.observeBookmarks(bookId)
+
+    /** Feedback is delivered only from the persisted transaction result. */
+    fun addBookmark(chapterTitle: String?, onResult: (Result<Boolean>) -> Unit) {
+        val doc = current() ?: run {
+            onResult(Result.failure(IOException("当前没有打开的文档")))
+            return
+        }
+        val b = Bookmark(bookId = doc.bookId, chapter = chapter, ratio = ratio,
+            label = BookmarkRules.label(chapterTitle, doc.name, ratio), createdAt = 0)
+        viewModelScope.launch {
+            val result = try { Result.success(repo.addBookmark(b)) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { Result.failure(e) }
+            onResult(result)
+        }
+    }
+
+    fun deleteBookmark(id: Long) { viewModelScope.launch { runCatching { repo.deleteBookmark(id) } } }
+
+    /** 搜索结果跳转后，新页面加载完要高亮的词，以及要跳到本章第几个命中 */
+    var pendingFind by mutableStateOf<Pair<String, Int>?>(null)
+        private set
+    fun consumePendingFind() { pendingFind = null }
+
+    private var textCache: Pair<Int, List<String>>? = null
+
+    /** 全书搜索（TXT / EPUB）。章节纯文本按阅读会话缓存，同一本书第二次搜索不再读文件 */
+    suspend fun searchBook(query: String): List<SearchHit> {
+        val doc = current() ?: return emptyList()
+        val session = documentSession
+        val texts = textCache?.takeIf { it.first == session }?.second
+            ?: repo.chapterTexts(doc).also { textCache = session to it }
+        return withContext(Dispatchers.Default) { BookSearch.search(texts, query) }
+    }
+
+    /** 打开一条搜索结果：跳到那一章，加载完后高亮，并跳到本章第 n 个命中 */
+    fun openHit(hit: SearchHit, query: String, nthInChapter: Int) {
+        pendingFind = query to nthInChapter
+        jumpTo(hit.chapter, 0f)
+    }
+
+    /** SVG：显示图片还是源码 */
+    var svgSource by mutableStateOf(false)
+        private set
+    fun toggleSvgSource() { svgSource = !svgSource }
+
+    /** 单文件导入的 HTML 引用了同文件夹资源、但没有被带进来的路径 */
+    var missingResources by mutableStateOf<List<String>>(emptyList())
+        private set
+    fun reportMissing(paths: List<String>) { missingResources = paths }
+
     var editorSession by mutableStateOf<EditorSession?>(null)
         private set
 
@@ -267,6 +376,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         reader = ReaderState.Loading
         documentSession++
         chapterAnchor = null
+        svgSource = false
+        missingResources = emptyList()
+        pendingFind = null
         loadJob = viewModelScope.launch {
             reader = try {
                 startup.await()?.let { throw it }

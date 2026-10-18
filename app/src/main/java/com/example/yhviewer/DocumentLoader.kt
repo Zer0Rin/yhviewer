@@ -96,14 +96,37 @@ fun LoadedDoc.toDisplayHtml(
     context: Context,
     theme: ReaderTheme = ReaderTheme.AUTO,
     wrap: Boolean = false,
-): String = when (type) {
-    DocType.HTML -> text
-    DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
-    DocType.CODE, DocType.UNKNOWN, DocType.TXT, DocType.EPUB -> CodeRenderer.render(
+    svgSource: Boolean = false,
+): String = when {
+    // v10：SVG 默认以图片显示（<img> 里的 SVG 不执行脚本、不加载外部资源），菜单可切回源码
+    isSvg && !svgSource -> SvgRenderer.render(text, theme)
+    type == DocType.HTML -> text
+    type == DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
+    else -> CodeRenderer.render(
         text = text,
         lang = CodeLanguages.forFileName(name) ?: "plaintext",
         wrap = wrap,
         template = Templates.get(context, Templates.CODE),
         theme = theme,
     )
+}
+
+val LoadedDoc.isSvg get() = name.substringAfterLast('.', "").equals("svg", ignoreCase = true)
+
+/** v10：SVG 预览页。纯函数，JVM 可测 */
+object SvgRenderer {
+    fun render(svg: String, theme: ReaderTheme): String {
+        val data = java.util.Base64.getEncoder().encodeToString(svg.toByteArray(Charsets.UTF_8))
+        return """<!doctype html><html lang="zh" data-theme="${theme.id}"><head><meta charset="utf-8">""" +
+            """<meta name="viewport" content="width=device-width, initial-scale=1">""" +
+            """<link rel="stylesheet" href="/assets/shared/themes.css"><style>""" +
+            """html,body{margin:0;min-height:100%;background:var(--bg)}body{display:grid;place-items:center;min-height:100vh}""" +
+            """figure{margin:0;padding:24px;display:grid;gap:12px;justify-items:center}""" +
+            """img{max-width:100%;height:auto;background:repeating-conic-gradient(rgba(127,127,127,.18) 0 25%,transparent 0 50%) 0 0/16px 16px}""" +
+            """figcaption{color:var(--muted);font:13px/1.5 var(--font-sans);text-align:center;max-width:32em}""" +
+            """</style></head><body><figure><img alt="SVG 图片" src="data:image/svg+xml;base64,$data">""" +
+            """<figcaption>SVG 以图片方式显示，其中的脚本不会运行。右上角菜单可以切换到源码。</figcaption></figure>""" +
+            """<script>window.setTheme=function(t){if(['auto','paper','ink','terminal'].indexOf(t)>=0)document.documentElement.setAttribute('data-theme',t)}</script>""" +
+            """</body></html>"""
+    }
 }

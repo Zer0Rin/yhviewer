@@ -40,6 +40,7 @@ import androidx.core.view.ViewCompat
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,11 +93,23 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     var permissionsOpen by remember { mutableStateOf(false) }
     // Retain the source across reader errors; renderer loss can affect both WebViews.
     var runRequest by remember(vm.documentSession) { mutableStateOf<RunRequest?>(null) }
+    // v10：页内查找、书签、缺失资源提示
+    val handle = remember { WebViewHandle() }
+    val find = remember(vm.documentSession) { FindState() }
+    var moreOpen by remember { mutableStateOf(false) }
+    var bookmarksOpen by remember { mutableStateOf(false) }
+    var missingDismissed by remember(vm.documentSession) { mutableStateOf(false) }
+    val bookmarks by remember(doc?.bookId) {
+        doc?.let { vm.bookmarks(it.bookId) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+    BackHandler(enabled = find.open) { find.open = false; find.lastSearched = null; handle.clearFind() }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = { Column {
-            TopAppBar(
+            if (find.open) {
+                FindBar(find, handle, onClose = { find.open = false; find.lastSearched = null; handle.clearFind() }, onBookSearch = null)
+            } else TopAppBar(
                 // 文件名不是书名：用界面字体，不用标题衬线
                 title = { Text(doc?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
                 navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
@@ -111,6 +124,19 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                     if (doc != null && type == DocType.HTML) {
                         if (AppCapabilities.effective(doc.permissions).isRelaxed) Text("已放宽", color = MaterialTheme.colorScheme.error)
                         TextButton(onClick = { permissionsOpen = true }) { Text("权限") }
+                    }
+                    if (doc != null) TextButton(onClick = { find.open = true }) { Text("搜索") }
+                    if (doc != null) Box {
+                        TextButton(onClick = { moreOpen = true }, modifier = Modifier.semantics { contentDescription = "更多" }) { Text("⋯") }
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                            DropdownMenuItem(text = { Text("书签（${bookmarks.size}）") }, onClick = { moreOpen = false; bookmarksOpen = true })
+                            if (doc.doc.isSvg) {
+                                DropdownMenuItem(
+                                    text = { Text(if (vm.svgSource) "显示图片" else "查看源码") },
+                                    onClick = { moreOpen = false; vm.toggleSvgSource() },
+                                )
+                            }
+                        }
                     }
                     if (doc != null && type != DocType.HTML) { // 原样 HTML 不套主题
                         Box {
@@ -136,17 +162,32 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
             )
             // 顶栏和正文同色（都跟随阅读主题），用一条细线分开
             HorizontalDivider(color = LocalYH.current.lineSoft)
+            if (vm.missingResources.isNotEmpty() && !missingDismissed) {
+                ReaderNotice(
+                    MissingResources.message(vm.missingResources, bundled = doc?.bundle != null),
+                    onClose = { missingDismissed = true },
+                )
+            }
         } },
     ) { padding ->
         val m = Modifier.padding(padding).fillMaxSize()
         when (state) {
             ReaderState.Loading -> Box(m, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             is ReaderState.Error -> CenterText("打开失败：${state.message}", m)
-            is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m)
+            is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m, handle, find)
         }
     }
     runRequest?.let { request ->
         RunSheet(request.code, request.fileName, vm.theme, lang = request.lang, onDismiss = { runRequest = null })
+    }
+    if (bookmarksOpen && doc != null) {
+        BookmarkSheet(
+            bookmarks = bookmarks,
+            onAdd = { done -> vm.addBookmark(null, done) },
+            onPick = { bookmarksOpen = false; vm.jumpTo(0, it.ratio) },
+            onDelete = { vm.deleteBookmark(it.id) },
+            onDismiss = { bookmarksOpen = false },
+        )
     }
     if (permissionsOpen && doc != null && type == DocType.HTML) {
         PermissionSheet(doc.permissions, { vm.setPermissions(doc.bookId, it) }, { permissionsOpen = false })
@@ -154,21 +195,29 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
 }
 
 @Composable
-private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: Modifier) {
+private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: Modifier, handle: WebViewHandle, find: FindState) {
     val context = LocalContext.current
     val session = vm.documentSession
-    key(vm.documentSession, doc.bookId, doc.permissions) {
-        val html = remember(doc) { doc.doc.toDisplayHtml(context, vm.theme, vm.wrap) }
+    val isHtml = doc.doc.type == DocType.HTML
+    key(vm.documentSession, doc.bookId, doc.permissions, vm.jumpTick, vm.svgSource) {
+        val html = remember(doc, vm.svgSource) { doc.doc.toDisplayHtml(context, vm.theme, vm.wrap, vm.svgSource) }
+        // v10：文件夹导入的 HTML / Markdown 挂在 /bundle/ 下，相对路径的资源可用
+        val source = doc.bundle?.let { PageSource.BundleFile(it.rootDir, it.relPath, html) } ?: PageSource.Html(html)
         HtmlView(
-            source = PageSource.Html(html),
+            source = source,
             modifier = modifier,
-            theme = vm.theme.takeIf { doc.doc.type != DocType.HTML },
-            wrap = vm.wrap.takeIf { doc.doc.type in setOf(DocType.CODE, DocType.UNKNOWN) },
+            theme = vm.theme.takeIf { !isHtml },
+            wrap = vm.wrap.takeIf { doc.doc.type in setOf(DocType.CODE, DocType.UNKNOWN) && !doc.doc.isSvg },
             initialRatio = vm.initialRatio(),
             onRatioChanged = { vm.onScroll(session, 0, it) },
             onRendererGone = { vm.onRendererGone(session, 0) },
-            permissions = if (doc.doc.type == DocType.HTML) doc.permissions else DocPermissions.STANDARD,
-            storageProfileId = doc.bookId.takeIf { doc.doc.type == DocType.HTML },
+            permissions = if (isHtml) doc.permissions else DocPermissions.STANDARD,
+            storageProfileId = doc.bookId.takeIf { isHtml },
+            handle = handle,
+            onPageLoading = { find.pageLoading(); handle.clearFind() },
+            onPageReady = { find.replay(handle) },
+            onMissingLocal = { if (session == vm.documentSession) vm.reportMissing(it) },
+            dialogSource = doc.name,
         )
     }
 }
@@ -184,6 +233,24 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    // v10：页内查找、全书搜索、书签
+    val handle = remember { WebViewHandle() }
+    val find = remember(vm.documentSession) { FindState() }
+    var bookQuery by remember { mutableStateOf<String?>(null) }
+    var notice by remember(vm.documentSession) {
+        mutableStateOf(if ((doc as? OpenedDoc.Epub)?.vertical == true) "这本书原本是竖排，已转为横排阅读。" else null)
+    }
+    val bookmarks by remember(doc.bookId) { vm.bookmarks(doc.bookId) }.collectAsState(initial = emptyList())
+    BackHandler(enabled = find.open) { find.open = false; find.lastSearched = null; handle.clearFind() }
+    LaunchedEffect(notice) { if (notice != null) { kotlinx.coroutines.delay(4_000); notice = null } }
+    // 搜索结果跳转：新章节加载完后高亮，并跳到本章第 n 个命中
+    val onPageReady: () -> Unit = {
+        val pending = vm.pendingFind
+        vm.consumePendingFind()
+        find.replay(handle, pending)
+    }
+    val onPageLoading: () -> Unit = { find.pageLoading(); handle.clearFind() }
 
     ImmersiveSystemBars(hidden = !barsVisible, darkIcons = !palette.dark)
     KeepScreenOn(vm.reading.keepScreenOn)
@@ -208,6 +275,9 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 onPick = { vm.goToChapter(it); scope.launch { drawerState.close() } },
                 onPrev = vm::prevChapter,
                 onNext = vm::nextChapter,
+                bookmarks = bookmarks,
+                onBookmark = { b -> vm.jumpTo(b.chapter, b.ratio); scope.launch { drawerState.close() } },
+                onDeleteBookmark = { vm.deleteBookmark(it.id) },
             )
         },
     ) {
@@ -218,15 +288,22 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 doc = doc,
                 gestures = gestures,
                 modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout),
+                handle = handle,
+                onPageReady = onPageReady,
+                onPageLoading = onPageLoading,
             )
 
             AnimatedVisibility(
-                visible = barsVisible,
+                visible = barsVisible || find.open,
                 enter = slideInVertically { -it } + fadeIn(),
                 exit = slideOutVertically { -it } + fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter),
-            ) {
-                TopAppBar(
+            ) { Column {
+                if (find.open) FindBar(
+                    find, handle,
+                    onClose = { find.open = false; find.lastSearched = null; handle.clearFind() },
+                    onBookSearch = { q -> bookQuery = q.trim() },
+                ) else TopAppBar(
                     title = {
                         Text(
                             titles.getOrNull(vm.chapter) ?: doc.name,
@@ -238,10 +315,12 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                     navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                     actions = {
                         if (titles.size > 1) TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
+                        TextButton(onClick = { find.open = true }) { Text("搜索") }
                         TextButton(onClick = { settingsOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读设置" }) { Text("Aa") }
                     },
                 )
-            }
+                notice?.let { ReaderNotice(it, onClose = { notice = null }) }
+            } }
 
             AnimatedVisibility(
                 visible = barsVisible,
@@ -260,6 +339,16 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
 
     }
 
+    bookQuery?.let { q ->
+        BookSearchSheet(
+            query = q,
+            titles = titles,
+            search = vm::searchBook,
+            onPick = { hit, nth -> bookQuery = null; vm.openHit(hit, q, nth) },
+            onDismiss = { bookQuery = null },
+        )
+    }
+
     if (settingsOpen) {
         ReaderSettingsSheet(
             theme = vm.theme,
@@ -270,18 +359,34 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             chapterCount = titles.size,
             onChapter = { vm.goToChapter(it) },
             onDismiss = { settingsOpen = false },
+            onBookmark = {
+                settingsOpen = false
+                val title = titles.getOrNull(vm.chapter)
+                val session = vm.documentSession
+                vm.addBookmark(title) { result ->
+                    if (session == vm.documentSession) notice = BookmarkFeedback.message(result, "已加书签：${title ?: doc.name}")
+                }
+            },
         )
     }
 }
 
 @Composable
-private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGestures, modifier: Modifier) {
+private fun BookContent(
+    vm: ShelfViewModel,
+    doc: OpenedDoc,
+    gestures: ReaderGestures,
+    modifier: Modifier,
+    handle: WebViewHandle,
+    onPageReady: () -> Unit,
+    onPageLoading: () -> Unit,
+) {
     val context = LocalContext.current
     val session = vm.documentSession
     val index = vm.chapter
     when (doc) {
         // TXT：主题和排版都通过 JS 实时切换，不重新加载
-        is OpenedDoc.Txt -> key(vm.documentSession, doc.bookId, index) {
+        is OpenedDoc.Txt -> key(vm.documentSession, doc.bookId, index, vm.jumpTick) {
             val html = remember(doc, index) {
                 TxtRenderer.render(
                     doc.chapters[index], index, doc.chapters.size,
@@ -297,11 +402,14 @@ private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGest
                 onRatioChanged = { vm.onScroll(session, index, it) },
                 onRendererGone = { vm.onRendererGone(session, index) },
                 gestures = gestures,
+                handle = handle,
+                onPageReady = onPageReady,
+                onPageLoading = onPageLoading,
             )
         }
 
         // EPUB：章节禁用 JS，主题或排版变化时以当前位置重新加载本章（key 里带上两者）
-        is OpenedDoc.Epub -> key(vm.documentSession, doc.bookId, index, vm.theme, vm.reading.toCss()) {
+        is OpenedDoc.Epub -> key(vm.documentSession, doc.bookId, index, vm.theme, vm.reading.toCss(), vm.jumpTick) {
             HtmlView(
                 source = PageSource.BookFile(doc.rootDir, doc.chapters[index].path, vm.chapterAnchor),
                 modifier = modifier,
@@ -310,8 +418,12 @@ private fun BookContent(vm: ShelfViewModel, doc: OpenedDoc, gestures: ReaderGest
                 onRendererGone = { vm.onRendererGone(session, index) },
                 onInternalLink = vm::onBookLink,
                 bookTheme = { vm.theme },
-                bookReadingCss = { vm.reading.toCss() },
+                // v10：竖排书转为横排（阅读器按上下滚动翻页设计）
+                bookReadingCss = { vm.reading.toCss() + if (doc.vertical) EpubInjector.HORIZONTAL_CSS else "" },
                 gestures = gestures,
+                handle = handle,
+                onPageReady = onPageReady,
+                onPageLoading = onPageLoading,
             )
         }
 

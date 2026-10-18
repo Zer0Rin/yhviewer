@@ -57,7 +57,7 @@ class MigrationTest {
     @Test
     fun migrateAllTheWayFrom1() {
         helper.createDatabase(dbName, 1).apply { execSQL(insertV1); close() }
-        helper.runMigrationsAndValidate(dbName, 4, true, MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).close()
+        helper.runMigrationsAndValidate(dbName, 5, true, MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).close()
     }
     @Test
     fun migrate3To4PreservesMetadataAndAddsUnclassifiedUngroupedDefaults() {
@@ -87,4 +87,24 @@ class MigrationTest {
         db.close()
     }
 
+    @Test
+    fun migrate4To5AddsBookmarksAndKeepsBooks() {
+        helper.createDatabase(dbName, 4).apply {
+            execSQL(insertV1)
+            execSQL("UPDATE books SET locator = '1:0.2500', groupId = NULL, kind = 'novel'")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 5, true, MIGRATION_4_5)
+        db.query("SELECT locator, kind FROM books").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("1:0.2500", c.getString(0))
+            assertEquals("novel", c.getString(1))
+        }
+        db.execSQL("INSERT INTO bookmarks(bookId, chapter, ratio, label, createdAt) VALUES (1, 1, 0.25, '第二章 · 25%', 1)")
+        db.query("SELECT label FROM bookmarks WHERE bookId = 1").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("第二章 · 25%", c.getString(0))
+        }
+        db.close()
+    }
 }

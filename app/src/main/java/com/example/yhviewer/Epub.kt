@@ -36,6 +36,8 @@ data class EpubBook(
     val chapters: List<EpubChapter>,
     val author: String? = null,
     val coverPath: String? = null,
+    /** v10：原书是竖排（页序从右到左，或 CSS 声明 writing-mode: vertical-*）。阅读时转为横排，见 EpubInjector.HORIZONTAL_CSS */
+    val vertical: Boolean = false,
 )
 
 object SafeUnzip {
@@ -149,7 +151,18 @@ object EpubParser {
         val chapters = spine.mapIndexed { i, item ->
             EpubChapter(tocTitles[item.href] ?: "第 ${i + 1} 节", item.href)
         }
-        return EpubBook(title, chapters, author, coverPath)
+        return EpubBook(title, chapters, author, coverPath, isVertical(root, opf, manifest.values))
+    }
+
+    private val VERTICAL_CSS = Regex("""writing-mode\s*:\s*vertical-""", RegexOption.IGNORE_CASE)
+
+    /** 页序 rtl，或任何样式表声明了竖排。只读不超过 1 MB 的 CSS，读失败当作横排 */
+    private fun isVertical(root: File, opf: Document, items: Collection<Item>): Boolean {
+        if (opf.byName("spine").firstOrNull()?.getAttribute("page-progression-direction") == "rtl") return true
+        return items.filter { it.mediaType == "text/css" }.any { item ->
+            val f = File(root, item.href)
+            f.isFile && f.length() <= 1_000_000 && runCatching { VERTICAL_CSS.containsMatchIn(f.readText()) }.getOrDefault(false)
+        }
     }
 
     private val IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
@@ -284,6 +297,14 @@ object EpubInjector {
     const val LINKS =
         """<link rel="stylesheet" type="text/css" href="/assets/shared/themes.css"/>""" +
             """<link rel="stylesheet" type="text/css" href="/assets/book/epub.css"/>"""
+
+    /**
+     * v10：把竖排书转成横排阅读。阅读器按"上下滚动 + 点击翻页"设计，竖排内容会变成横向滚动，
+     * 进度、翻页、目录跳转都会失效。放在 readingCss 里注入（不含 "<" "&"，满足 inject 的要求）。
+     */
+    const val HORIZONTAL_CSS =
+        "html,body,body *{writing-mode:horizontal-tb !important;-webkit-writing-mode:horizontal-tb !important;" +
+            "-epub-writing-mode:horizontal-tb !important;text-orientation:mixed !important}"
 
     fun inject(xhtml: String, theme: ReaderTheme, readingCss: String = ""): String {
         require('<' !in readingCss && '&' !in readingCss) { "Unsafe reading CSS for XHTML" }

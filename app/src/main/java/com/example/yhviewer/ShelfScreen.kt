@@ -1,5 +1,6 @@
 package com.example.yhviewer
 
+import androidx.compose.foundation.verticalScroll
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
@@ -168,7 +169,7 @@ internal fun pruneShelfSelection(selectedIds: List<Long>, sections: ShelfSection
 // ======================= 书架 =======================
 
 @Composable
-fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
+fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> Unit = {}) {
     val yh = LocalYH.current
     val books by vm.books.collectAsState()
     val loadedGroups by vm.groups.collectAsState()
@@ -222,7 +223,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
                     onCancel = { selectedIds = emptyList() },
                 )
             } else {
-                ShelfHeader(list, onOpenFile)
+                ShelfHeader(list, onOpenFile, onOpenFolder)
             }
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 UnderlineField(value = vm.query, onValueChange = vm::updateQuery, placeholder = "搜索书名、作者、文件名")
@@ -240,7 +241,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
 
             when {
                 list == null || sections == null -> Unit // 第一次查询还没回来，什么都不画，避免空状态闪烁
-                list.isEmpty() && !searching -> EmptyShelf(onOpenFile)
+                list.isEmpty() && !searching -> EmptyShelf(onOpenFile, onOpenFolder)
                 sections.isEmpty -> CenterText(
                     when {
                         searching -> "没有匹配「${vm.query.trim()}」的内容"
@@ -289,6 +290,9 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
             }
         }
 
+        // v10：导入进度（多选时不显示，避免和操作栏重叠）
+        if (!selecting) Box(Modifier.align(Alignment.BottomCenter)) { ImportStatus(vm) }
+
         // 多选时的底部操作栏
         AnimatedVisibility(
             visible = selecting,
@@ -332,7 +336,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit) {
 // ======================= 头部 =======================
 
 @Composable
-private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit) {
+private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit, onOpenFolder: () -> Unit) {
     val yh = LocalYH.current
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
@@ -350,7 +354,71 @@ private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit) {
             }
             Text("书架", style = MaterialTheme.typography.headlineLarge, color = yh.fg)
         }
-        OutlineAction("＋ 打开", onOpenFile)
+        OpenMenu(onOpenFile, onOpenFolder)
+    }
+}
+
+/** v10："＋ 打开"展开两项：选择文件（可多选）/ 导入文件夹（HTML 会带上同文件夹的图片和样式） */
+@Composable
+private fun OpenMenu(onOpenFile: () -> Unit, onOpenFolder: () -> Unit, label: String = "＋ 打开") {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlineAction(label) { open = true }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Column { Text("选择文件"); Text("可以一次选多个", style = MaterialTheme.typography.bodySmall, color = LocalYH.current.muted) } },
+                onClick = { open = false; onOpenFile() },
+            )
+            DropdownMenuItem(
+                text = { Column { Text("导入文件夹"); Text("网页会带上同文件夹的图片和样式", style = MaterialTheme.typography.bodySmall, color = LocalYH.current.muted) } },
+                onClick = { open = false; onOpenFolder() },
+            )
+        }
+    }
+}
+
+/** v10：导入进度（浮动胶囊）和导入报告 */
+@Composable
+private fun ImportStatus(vm: ShelfViewModel) {
+    val yh = LocalYH.current
+    vm.importProgress?.let { p ->
+        FloatingCapsule {
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (p.total == 0) "正在读取文件夹…" else "正在导入 ${p.done.coerceAtMost(p.total)} / ${p.total}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = yh.fg,
+                )
+                if (p.current.isNotEmpty()) {
+                    Text(p.current, style = MaterialTheme.typography.bodySmall, color = yh.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (p.total > 0) DotProgress(p.done.toFloat() / p.total)
+            }
+        }
+    }
+    vm.importReport?.let { r ->
+        AlertDialog(
+            onDismissRequest = vm::dismissImportReport,
+            title = { Text(if (r.failed.isEmpty()) "导入完成" else "导入完成，部分失败") },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "已导入 ${r.imported} 项" + (if (r.resources > 0) "，带上 ${r.resources} 个图片 / 样式等资源" else "") + "。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (r.failed.isNotEmpty()) {
+                        Text("失败 ${r.failed.size} 项：", style = MaterialTheme.typography.labelLarge, color = yh.accent)
+                        r.failed.take(20).forEach { (n, why) -> Text("· $n：$why", style = MaterialTheme.typography.bodySmall) }
+                    }
+                    if (r.skipped.isNotEmpty()) {
+                        Text("跳过 ${r.skipped.size} 项：", style = MaterialTheme.typography.labelLarge, color = yh.muted)
+                        r.skipped.take(20).forEach { (n, why) -> Text("· $n：$why", style = MaterialTheme.typography.bodySmall, color = yh.muted) }
+                        if (r.skipped.size > 20) Text("…", color = yh.muted)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = vm::dismissImportReport) { Text("好") } },
+        )
     }
 }
 
@@ -860,7 +928,7 @@ private fun TypeGlyph(book: Book) {
 // ======================= 空书架 =======================
 
 @Composable
-private fun EmptyShelf(onOpenFile: () -> Unit) {
+private fun EmptyShelf(onOpenFile: () -> Unit, onOpenFolder: () -> Unit) {
     val yh = LocalYH.current
     Column(
         Modifier.fillMaxSize().padding(horizontal = 32.dp),
@@ -876,7 +944,7 @@ private fun EmptyShelf(onOpenFile: () -> Unit) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(20.dp))
-        OutlineAction("＋ 打开文件", onOpenFile)
+        OpenMenu(onOpenFile, onOpenFolder, label = "＋ 打开文件")
     }
 }
 

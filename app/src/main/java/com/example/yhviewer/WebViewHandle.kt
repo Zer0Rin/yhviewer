@@ -13,6 +13,7 @@ import kotlin.coroutines.resume
 class WebViewHandle {
     var webView: WebView? = null
         private set
+    private var findEpoch = 0
     private val pending = mutableMapOf<CancellableContinuation<String?>, WebView>()
 
     internal fun attach(view: WebView) {
@@ -23,7 +24,7 @@ class WebViewHandle {
 
     internal fun detach(view: WebView) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (webView === view) webView = null
+        if (webView === view) { webView = null; findEpoch++ }
         val callbacks = pending.filterValues { it === view }.keys.toList()
         callbacks.forEach { continuation ->
             pending.remove(continuation)
@@ -61,5 +62,38 @@ class WebViewHandle {
     fun markSaved(snapshot: String) {
         check(Looper.myLooper() == Looper.getMainLooper())
         webView?.evaluateJavascript("window.editorApi && window.editorApi.markSaved(${MarkdownRenderer.toJsonString(snapshot)})", null)
+    }
+
+    // ---------------- v10：页内查找（原生 findAllAsync，不经过页面脚本，EPUB 禁用 JS 也能用） ----------------
+
+    /** 查找 query 并高亮全部结果；结果数通过 onResult(当前序号从 1 开始, 总数) 回调。query 为空时清除高亮 */
+    fun find(query: String, onResult: (Int, Int) -> Unit) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val view = webView ?: return onResult(0, 0)
+        val epoch = ++findEpoch
+        view.setFindListener { active, total, done ->
+            if (done && webView === view && epoch == findEpoch) onResult(if (total == 0) 0 else active + 1, total)
+        }
+        if (query.isBlank()) { view.clearMatches(); onResult(0, 0) } else view.findAllAsync(query)
+    }
+
+    fun findNext(forward: Boolean) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        webView?.findNext(forward)
+    }
+
+    fun clearFind() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        findEpoch++
+        webView?.let { it.clearMatches(); it.setFindListener(null) }
+    }
+
+    /** 跳到章内比例（书签跳转到当前章时用）；内容高度按缩放换算 */
+    @Suppress("DEPRECATION")
+    fun scrollToRatio(ratio: Float) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val view = webView ?: return
+        val range = ((view.contentHeight * view.scale).toInt() - view.height).coerceAtLeast(0)
+        view.scrollTo(0, (ratio.coerceIn(0f, 1f) * range).toInt())
     }
 }
