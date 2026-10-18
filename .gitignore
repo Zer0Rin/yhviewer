@@ -22,3 +22,6 @@ node_modules/
 
 # Local Python tool caches
 __pycache__/
+
+# Local agent progress ledger
+.superpowers/
