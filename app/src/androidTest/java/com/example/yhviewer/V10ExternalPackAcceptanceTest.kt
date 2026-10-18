@@ -325,12 +325,37 @@ class V10ExternalPackAcceptanceTest {
                 if (book.name.startsWith("02_") && book.type == DocType.HTML) {
                     assertEquals("true", eval(s, "document.images.length>0 && [...document.images].every(i=>i.complete&&i.naturalWidth>0)"))
                     assertEquals("\"rgb(230, 246, 239)\"", eval(s, "getComputedStyle(document.querySelector('.external-css-marker')).backgroundColor"))
+                    eval(s, "[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文')).scrollIntoView({block:'center'}); true")
+                    val point = org.json.JSONArray(eval(s, "(()=>{const r=[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文')).getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()"))
+                    s.onActivity {
+                        val view = web(s)!!
+                        @Suppress("DEPRECATION") val scale = view.scale
+                        val now = android.os.SystemClock.uptimeMillis()
+                        for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                            val event = android.view.MotionEvent.obtain(now, now + action * 50L, action, point.getDouble(0).toFloat() * scale, point.getDouble(1).toFloat() * scale, 0)
+                            view.dispatchTouchEvent(event); event.recycle()
+                        }
+                    }
+                    compose.waitUntil(15_000) {
+                        var loaded = false
+                        s.onActivity { loaded = web(s)?.let { it.url.orEmpty().endsWith("03_English_navigation.html#chapter-two") && it.progress == 100 } == true }
+                        loaded
+                    }
+                    assertEquals("true", eval(s, "document.readyState==='complete' && !!document.getElementById('chapter-two')"))
                 }
                 if (doc is OpenedDoc.Epub) assertEquals(book.sourceUri.contains("04_"), doc.vertical)
                 if (doc is OpenedDoc.Epub && book.sourceUri.contains("04_")) s.onActivity {
                     assertFalse("Vertical EPUB must use vertical scrolling after normalization", web(s)!!.canScrollHorizontally(1) || web(s)!!.canScrollHorizontally(-1))
                 }
                 if (doc is OpenedDoc.Epub && book.sourceUri.contains("02_")) assertTrue(repo.covers.exists(book.id))
+                if (doc is OpenedDoc.Epub && Uri.decode(book.sourceUri).substringAfterLast('/').startsWith("05_")) {
+                    val results = BookSearch.search(texts, "停留")
+                    assertTrue(results.map { it.chapter }.distinct().size > 1)
+                    val third = results.filter { it.chapter == 1 }[2]
+                    val chapterCount = BookSearch.search(listOf(texts[1]), "停留").size
+                    model(s) { it.openHit(third, "停留", 2) }
+                    waitText("3/$chapterCount")
+                }
                 android.util.Log.i("V10Pack", "PASS ${book.name}: nativeFind($marker), chapter ${hit.chapter}")
                 model(s) { it.backToShelf() }
             }
