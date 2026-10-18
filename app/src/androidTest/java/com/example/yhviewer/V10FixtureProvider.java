@@ -68,6 +68,11 @@ public class V10FixtureProvider extends DocumentsProvider {
             put("unsupported.zip", "not a supported document");
             Bundle b = new Bundle(); b.putBoolean("ready", true); return b;
         }
+        if ("reviewFixture".equals(method)) {
+            put("review-search.txt", "第一章 needle\nneedle first\nneedle second\n第二章 end\nEND");
+            put("review.txt", "短篇正文\n" + repeated("正文 needle first needle second\n") + "REVIEW-END");
+            Bundle b = new Bundle(); b.putBoolean("ready", true); return b;
+        }
         if ("externalReady".equals(method)) { Bundle b = new Bundle(); b.putBoolean("ready", new File(root("external"), "测试清单.csv").isFile()); return b; }
         if ("removeGeneric".equals(method)) { File f=file("generic:"+arg); if (!f.isFile()) throw new IllegalArgumentException(arg); f.delete(); return Bundle.EMPTY; }
         return super.call(method, arg, extras);

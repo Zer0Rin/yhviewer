@@ -381,9 +381,10 @@ object MissingResources {
         paths.map { it.removePrefix("/doc/").removePrefix("/bundle/") }.filter { it.isNotBlank() }.distinct().sorted()
 
     fun message(paths: List<String>, bundled: Boolean): String {
-        val shown = display(paths)
+        val overflow = MissingResourceAccumulator.OVERFLOW in paths
+        val shown = display(paths.filter { it != MissingResourceAccumulator.OVERFLOW })
         val head = shown.take(2).joinToString("、")
-        val more = if (shown.size > 2) " 等 ${shown.size} 个文件" else ""
+        val more = if (overflow) " 等至少 " + (shown.size + 1) + " 个文件" else if (shown.size > 2) " 等 ${shown.size} 个文件" else ""
         return if (bundled) "页面引用的 $head$more 不在导入的文件夹里。"
         else "页面引用了同文件夹里的 $head$more，单个文件导入时它们没有被带进来。在书架用「导入文件夹」导入整个文件夹即可显示。"
     }

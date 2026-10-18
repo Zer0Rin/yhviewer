@@ -342,7 +342,7 @@ fun HtmlView(
     var jsDialog by remember { mutableStateOf<JsDialogRequest?>(null) }
     var dialogsShown by remember { mutableIntStateOf(0) }
     var dialogsBlocked by remember { mutableStateOf(false) }
-    val missing = remember { java.util.concurrent.ConcurrentSkipListSet<String>() }
+    val missing = remember { MissingResourceAccumulator() }
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
 
@@ -459,7 +459,7 @@ fun HtmlView(
                         onPageLoaded = { pageLoads++; latestOnPageReady() },
                         onPageLoading = { latestOnPageLoading() },
                         onMissingLocal = { path ->
-                            if (missing.add(path)) post { latestOnMissing(missing.toList()) }
+                            if (missing.add(path)) post { latestOnMissing(missing.drainNotification()) }
                         },
                         onRendererGone = { dead ->
                             if (sessions.containsKey(dead)) {

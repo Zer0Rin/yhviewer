@@ -135,7 +135,7 @@ class ShelfRepository(
                 val staging = File(dir, "$bundle.tmp")
                 val root = File(dir, bundle)
                 val budget = BundleCopyBudget(FolderImportPlanner.Limits().maxBundleBytes)
-                val docs = ArrayList<Triple<String, LoadedDoc, Long>>() // relPath, doc, utf-8 size
+                val docs = ArrayList<StagedBundleDocument>()
                 try {
                     withContext(Dispatchers.IO) {
                         for (p in plan.bundleFiles) {
@@ -155,7 +155,7 @@ class ShelfRepository(
                                     target.parentFile?.mkdirs()
                                     budget.add(bytes.size.toLong())
                                     target.writeBytes(bytes)
-                                    docs += Triple(rel, LoadedDoc(name, DocTypes.detect(name, null), text), bytes.size.toLong())
+                                    docs += StagedBundleDocument.from(rel, bytes.size.toLong(), text)
                                 } else {
                                     val size = DocumentLoader.copyTo(context, uri, target, minOf(FolderImportPlanner.Limits().maxFileBytes, budget.remaining))
                                     budget.add(size)
@@ -178,13 +178,14 @@ class ShelfRepository(
                 }
 
                 val previousTops = HashSet<String>()
-                for ((rel, doc, size) in docs) {
+                for (doc in docs) {
+                    val rel = doc.relPath
+                    val size = doc.size
                     onProgress(ImportProgress(done, total, rel))
                     val key = BundlePaths.sourceKey(treeUri.toString(), rel)
                     dao.findBySource(key)?.let { previousTops += BundlePaths.topLevel(it.localFile) }
                     try {
-                        val kind = ContentClassifier.classify(doc.name, doc.type, size, doc.text)
-                        commit(key, doc.name, doc.type, BundlePaths.localFile(bundle, rel), size, kind, null)
+                        commit(key, doc.name, doc.type, BundlePaths.localFile(bundle, rel), size, doc.kind, null)
                         imported++
                     } catch (e: CancellationException) {
                         throw e
@@ -518,7 +519,7 @@ class ShelfRepository(
 
     /** 每章纯文本：TXT 直接取章节文本；EPUB 读章节 XHTML 去标签。单章读失败当作空章 */
     suspend fun chapterTexts(doc: OpenedDoc): List<String> = when (doc) {
-        is OpenedDoc.Txt -> doc.chapters.map { it.text }
+        is OpenedDoc.Txt -> doc.chapters.map { TxtSearchText.rendered(it.title, it.text) }
         is OpenedDoc.Epub -> withContext(Dispatchers.IO) {
             doc.chapters.map { ch ->
                 currentCoroutineContext().ensureActive()

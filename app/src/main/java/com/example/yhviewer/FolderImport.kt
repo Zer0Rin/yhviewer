@@ -116,7 +116,8 @@ object FolderImportPlanner {
      * 只接受普通文件名：不能为空，不能是 . / ..，不能含路径分隔符或 NUL。
      */
     fun safeName(name: String?): String? {
-        val n = name?.trim() ?: return null
+        if (name == null || name.length > 255 || name.toByteArray(Charsets.UTF_8).size > 255) return null
+        val n = name.trim()
         if (n.isEmpty() || n == "." || n == ".." || '/' in n || '\\' in n || '\u0000' in n) return null
         return n
     }

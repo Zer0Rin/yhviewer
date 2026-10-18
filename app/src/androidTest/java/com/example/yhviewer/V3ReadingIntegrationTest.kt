@@ -140,7 +140,7 @@ class V3ReadingIntegrationTest {
             tap(s, .5f)
             compose.onNodeWithText("Aa").performClick()
             compose.onNodeWithText("主题").assertIsDisplayed()
-            compose.onNodeWithText("无衬线").performClick()
+            compose.onNodeWithText("无衬线").performScrollTo().assertIsDisplayed().performClick()
             androidx.test.espresso.Espresso.pressBack()
             compose.waitUntil(10_000) { js(s, "document.getElementById('reading').textContent.includes('--font-sans')") == "true" }
             s.onActivity { a -> assertSame(original, web(a.window.decorView)); assertEquals(.4f, web(a.window.decorView)!!.scrollRatio(), .025f) }

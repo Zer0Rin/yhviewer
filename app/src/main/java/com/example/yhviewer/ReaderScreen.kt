@@ -314,7 +314,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                     },
                     navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
                     actions = {
-                        if (titles.size > 1) TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
+                        TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
                         TextButton(onClick = { find.open = true }) { Text("搜索") }
                         TextButton(onClick = { settingsOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读设置" }) { Text("Aa") }
                     },

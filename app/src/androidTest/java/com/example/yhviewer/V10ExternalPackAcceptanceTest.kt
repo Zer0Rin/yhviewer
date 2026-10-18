@@ -243,6 +243,46 @@ class V10ExternalPackAcceptanceTest {
         assertEquals(ContentKind.TEXT.id, book("sample.log").kind)
     }
 
+    @Test fun oneChapterTitleSearchAndBookmarkLifecycle() {
+        context.contentResolver.call(base, "reviewFixture", null, null)
+        val searchId = runBlocking { repo.import(uri("review-search.txt")) }
+        val searchDoc = runBlocking { repo.open(searchId) }
+        val titleHits = BookSearch.search(runBlocking { repo.chapterTexts(searchDoc) }, "needle")
+        assertEquals(3, titleHits.size)
+        val id = runBlocking { repo.import(uri("review.txt")) }
+        val doc = runBlocking { repo.open(id) as OpenedDoc.Txt }
+        assertEquals(1, doc.chapters.size)
+        val hits = BookSearch.search(runBlocking { repo.chapterTexts(doc) }, "needle")
+        assertEquals(120, hits.size)
+        launch().use { s ->
+            open(s, searchId)
+            model(s) { it.openHit(titleHits[2], "needle", 2) }
+            waitText("3/3")
+            compose.onAllNodesWithText("关闭", useUnmergedTree = true).onFirst().performClick()
+            open(s, id)
+            model(s) { it.jumpTo(0, .6f) }; waitWeb(s)
+            compose.onNodeWithText("Aa").performClick()
+            compose.onNodeWithText("添加当前位置书签").performClick()
+            compose.waitUntil(15_000) { runBlocking { repo.observeBookmarks(id).first().size } == 1 }
+            val mark = runBlocking { repo.observeBookmarks(id).first().single() }
+            model(s) { it.backToShelf() }
+            open(s, id)
+            model(s) { it.jumpTo(0, 0f) }; waitWeb(s)
+            compose.onNodeWithText("目录").performClick()
+            compose.onNodeWithText("书签 · 1").performClick()
+            compose.onNodeWithText(mark.label).performClick()
+            waitWeb(s)
+            var ratio = 0f
+            s.onActivity { ratio = ViewModelProvider(it)[ShelfViewModel::class.java].initialRatio() }
+            assertEquals(mark.ratio, ratio, .05f)
+            compose.onNodeWithText("目录").performClick()
+            compose.onNodeWithText("书签 · 1").performClick()
+            compose.onNodeWithText("删除").performClick()
+            compose.waitUntil(15_000) { runBlocking { repo.observeBookmarks(id).first().isEmpty() } }
+            waitText("书签 · 0")
+        }
+    }
+
     @Test fun reimportRetainsReferencedOldBundleAndMetadata() {
         folder()
         val page = book("page.html"); val other = book("other.html")
@@ -258,6 +298,7 @@ class V10ExternalPackAcceptanceTest {
         assertFalse(old.rootDir.exists())
     }
 
+    @ExternalFixturePack
     @Test fun externalThirtyFixturesImportAndFindEveryTailMarker() {
         assumeTrue("Opt-in real fixture pack: see docs/testing/v10-acceptance.md", InstrumentationRegistry.getArguments().getString("v10ExternalPack") == "true")
         assertTrue(context.contentResolver.call(base, "externalReady", null, null)!!.getBoolean("ready"))

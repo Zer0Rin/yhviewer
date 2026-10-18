@@ -37,7 +37,10 @@ object FolderWalker {
         val out = ArrayList<Found>()
         // 栈代替递归；目录和文件都计入遍历上限，避免空目录树或循环标识无限扩张。
         val stack = ArrayDeque<Triple<String, String, Int>>()
-        stack.addLast(Triple(DocumentsContract.getTreeDocumentId(treeUri), "", 0))
+        val metadata = ProviderMetadataBudget()
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        if (!metadata.accept(rootId, "")) return@withContext listOf(Found(treeUri, FolderEntry("文件夹", 0, "文件夹标识超过限制")))
+        stack.addLast(Triple(rootId, "", 0))
         val guard = FolderTraversalGuard(limits.maxEntries)
         val paths = HashSet<String>()
         while (stack.isNotEmpty()) {
@@ -54,22 +57,26 @@ object FolderWalker {
                     val id = c.getString(0)
                     val rawName = c.getString(1)
                     val name = FolderImportPlanner.safeName(rawName)
-                    if (id == null || name == null) {
-                        out += Found(treeUri, FolderEntry("$prefix/无效条目", 0, "非法文件名或标识"))
+                    if (!ProviderMetadataBudget.validId(id) || name == null) {
+                        out += Found(treeUri, FolderEntry("无效条目", 0, "非法文件名或标识"))
                         continue
                     }
                     if (FolderImportPlanner.ignored(name)) continue
                     val rel = if (prefix.isEmpty()) name else "$prefix/$name"
+                    if (!metadata.accept(id, rel)) {
+                        out += Found(treeUri, FolderEntry("无效条目", 0, "文件夹元数据超过限制"))
+                        continue
+                    }
                     if (!paths.add(rel)) {
                         out += Found(treeUri, FolderEntry(rel, 0, "重复文件路径"))
                         continue
                     }
                     if (c.getString(2) == Document.MIME_TYPE_DIR) {
-                        if (depth < limits.maxDepth) stack.addLast(Triple(id, rel, depth + 1))
+                        if (depth < limits.maxDepth) stack.addLast(Triple(id!!, rel, depth + 1))
                         else out += Found(treeUri, FolderEntry(rel, 0, "目录层级太深"))
                     } else {
                         val size = if (c.isNull(3)) 0L else c.getLong(3).coerceAtLeast(0)
-                        out += Found(DocumentsContract.buildDocumentUriUsingTree(treeUri, id), FolderEntry(rel, size))
+                        out += Found(DocumentsContract.buildDocumentUriUsingTree(treeUri, id!!), FolderEntry(rel, size))
                     }
                 }
             }
@@ -83,9 +90,11 @@ object FolderWalker {
 
     /** 文件夹显示名（导入报告里用） */
     fun folderName(context: Context, treeUri: Uri): String = runCatching {
-        val doc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+        val id = DocumentsContract.getTreeDocumentId(treeUri)
+        if (!ProviderMetadataBudget.validId(id)) return@runCatching "文件夹"
+        val doc = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
         context.contentResolver.query(doc, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
+            if (c.moveToFirst()) FolderImportPlanner.safeName(c.getString(0)) else null
         }
     }.getOrNull() ?: "文件夹"
 }
