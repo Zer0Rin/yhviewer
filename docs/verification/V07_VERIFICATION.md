@@ -31,3 +31,7 @@ Full API34 run39143419920 passed build/unit/Lint and all instrumented cases exce
 Corrected V3 class passes on the CI-sized local viewport for both editions:Strict3/3 in12.659seconds, Standard3/3 in12.973seconds. Full API34 CI [39144779319](https://github.com/Zer0Rin/yhviewer/actions/runs/39144779319) on38fb1d0 completed successfully:both build-and-unit-test and device-tests jobs passed. Final artifact counts are recorded below. The final follow-up commit changes this verification document only; production code and tests remain the verified38fb1d0 tree.
 
 Downloaded final CI XML confirms Strict127/127 and Standard136/136 instrumented tests, zero failures/errors/skips. The private-pack method is excluded before discovery, not represented as a passing or skipped CI case; its separate actual30-pack local checks passed on both editions as recorded above. CI also passes222 JVM tests per edition, Lint, debug builds and APK permission/Python-asset checks. Both unsigned R8 Release builds passed locally. No physical-phone operation, merge, tag, signing release workflow or publication was performed. Dedicated local emulator display override was reset and the task-launched emulator shut down after verification.
+
+## 用户真机验收与正式发布授权（2026-10-19）
+
+用户自行安装 PR #7 的正式签名0.7.0/code8 Standard候选包，并明确反馈覆盖升级、文件夹导入、H02资源、H04弹窗、查找与全书搜索、书签、竖排EPUB、SVG、Markdown脚注、多选及分享导入均正常。用户随后授权合并PR #7到main并发布v0.7.0。此前各节的PR-only/未发布说明记录的是候选验收阶段；本节记录其后的用户验收和发布授权。Codex没有在手机上执行额外安装、启动或测试。正式tag构建仍校验最终签名、版本、权限及优化包启动。
