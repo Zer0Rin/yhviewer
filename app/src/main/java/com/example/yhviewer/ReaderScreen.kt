@@ -1,6 +1,14 @@
 package com.example.yhviewer
 
 import android.app.Activity
+import android.net.Uri
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.background
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
@@ -255,11 +263,13 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
     ImmersiveSystemBars(hidden = !barsVisible, darkIcons = !palette.dark)
     KeepScreenOn(vm.reading.keepScreenOn)
 
+    // v11：连续滚动时滑到底不再翻章（下一章已经接在后面）
+    val flow = vm.reading.continuous
     val gestures = ReaderGestures(
         tapToTurn = vm.reading.tapToTurn,
         onToggleBars = { barsVisible = !barsVisible },
-        onReachEnd = vm::nextChapter,
-        onReachStart = vm::prevChapterFromStart,
+        onReachEnd = if (flow) ({}) else vm::nextChapter,
+        onReachStart = if (flow) ({}) else vm::prevChapterFromStart,
     )
 
     // v7: keep edge gestures for page turning/system back until explicitly opened.
@@ -291,6 +301,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 handle = handle,
                 onPageReady = onPageReady,
                 onPageLoading = onPageLoading,
+                findOpen = find.open,
             )
 
             AnimatedVisibility(
@@ -380,21 +391,32 @@ private fun BookContent(
     handle: WebViewHandle,
     onPageReady: () -> Unit,
     onPageLoading: () -> Unit,
+    findOpen: Boolean,
 ) {
+    // v11：默认章节连续滚动；Aa 里关掉则保持一章一页
+    if (vm.reading.continuous && doc !is OpenedDoc.Single) {
+        FlowContent(vm, doc, gestures, modifier, handle, onPageReady, onPageLoading, findOpen)
+        return
+    }
     val context = LocalContext.current
     val session = vm.documentSession
     val index = vm.chapter
     when (doc) {
         // TXT：主题和排版都通过 JS 实时切换，不重新加载
         is OpenedDoc.Txt -> key(vm.documentSession, doc.bookId, index, vm.jumpTick) {
-            val html = remember(doc, index) {
-                TxtRenderer.render(
-                    doc.chapters[index], index, doc.chapters.size,
-                    Templates.get(context, Templates.TXT), vm.theme, vm.reading,
-                )
+            // v11：章节正文按需从副本读取（见 TxtBook），不在主线程读文件
+            val html by produceState<String?>(null, doc, index) {
+                value = withContext(Dispatchers.IO) {
+                    runCatching {
+                        TxtRenderer.render(
+                            doc.book.chapter(index), index, doc.chapterCount,
+                            Templates.get(context, Templates.TXT), vm.theme, vm.reading,
+                        )
+                    }.getOrElse { "" }
+                }
             }
-            HtmlView(
-                source = PageSource.Html(html),
+            html?.let { page -> HtmlView(
+                source = PageSource.Html(page),
                 modifier = modifier,
                 theme = vm.theme,
                 reading = vm.reading.toCss(),
@@ -405,7 +427,7 @@ private fun BookContent(
                 handle = handle,
                 onPageReady = onPageReady,
                 onPageLoading = onPageLoading,
-            )
+            ) }
         }
 
         // EPUB：章节禁用 JS，主题或排版变化时以当前位置重新加载本章（key 里带上两者）
@@ -430,6 +452,87 @@ private fun BookContent(
         is OpenedDoc.Single -> Unit
     }
 }
+
+/**
+ * v11：章节连续滚动（TXT 和 EPUB 共用，见 assets/book/flow.html）。
+ *
+ * 只有主动跳转（目录、上一章/下一章、书签、搜索结果、章节内链接）才重建页面；滚动中换章只更新
+ * vm.chapter（顶栏标题、底部章节号、目录高亮跟着变），不重建。主题和排版通过 setTheme / setReading 实时生效。
+ * 没有 JS 桥：滚动时用 evaluateJavascript 读 YH.state()。
+ */
+@Composable
+private fun FlowContent(
+    vm: ShelfViewModel,
+    doc: OpenedDoc,
+    gestures: ReaderGestures,
+    modifier: Modifier,
+    handle: WebViewHandle,
+    onPageReady: () -> Unit,
+    onPageLoading: () -> Unit,
+    findOpen: Boolean,
+) {
+    val context = LocalContext.current
+    val session = vm.documentSession
+    val jump = vm.jumpTick
+    key(session, doc.bookId, jump) {
+        val readingCss = vm.reading.toCss() + if ((doc as? OpenedDoc.Epub)?.vertical == true) EpubInjector.HORIZONTAL_CSS else ""
+        val source = remember {
+            val urls = (doc as? OpenedDoc.Epub)?.chapters?.map { ch -> FlowShell.bookPath(ch.path) { Uri.encode(it) } }
+            val shell = FlowShell.render(
+                Templates.get(context, FlowShell.TEMPLATE), vm.theme, doc.chapterCount,
+                vm.chapter.coerceIn(0, doc.chapterCount - 1), vm.initialRatio(), vm.chapterAnchor, urls,
+                hold = findOpen || vm.pendingFind != null,
+            )
+            when (doc) {
+                is OpenedDoc.Epub -> PageSource.Flow(shell, epubRoot = doc.rootDir)
+                is OpenedDoc.Txt -> PageSource.Flow(shell, txt = doc.book, txtTemplate = Templates.get(context, FlowShell.TXT_CHAPTER))
+                is OpenedDoc.Single -> error("not a book")
+            }
+        }
+        // 滚动事件只当作"该读状态了"的信号，合并成一个
+        val ticks = remember { Channel<Unit>(Channel.CONFLATED) }
+        val latestOnPageReady by rememberUpdatedState(onPageReady)
+        HtmlView(
+            source = source,
+            modifier = modifier,
+            theme = vm.theme,
+            reading = readingCss,
+            initialRatio = 0f,
+            onRatioChanged = { ticks.trySend(Unit) },
+            onRendererGone = { vm.onRendererGone(session, vm.chapter) },
+            onInternalLink = vm::onFlowLink,
+            bookTheme = { vm.theme },
+            bookReadingCss = { readingCss },
+            gestures = gestures,
+            handle = handle,
+            onPageReady = { ticks.trySend(Unit) },
+            onPageLoading = onPageLoading,
+        )
+        LaunchedEffect(Unit) {
+            var announced = false
+            while (true) {
+                if (announced) {
+                    ticks.receive()
+                    delay(FLOW_POLL_DEBOUNCE_MS)
+                } else {
+                    // 等第一章加载完、恢复好位置
+                    withTimeoutOrNull(FLOW_READY_POLL_MS) { ticks.receive() }
+                }
+                val state = FlowShell.parseState(handle.evaluate("window.YH ? YH.state() : ''")) ?: continue
+                if (!announced) {
+                    announced = true
+                    latestOnPageReady() // 搜索结果跳转后的高亮在这里重放：此时只有目标章已加载
+                }
+                vm.onFlowPosition(session, state.first, state.second, jump)
+            }
+        }
+        // 查找栏打开时暂停补章，查找结果数不会中途变化
+        LaunchedEffect(findOpen) { handle.evaluate("window.YH && YH.hold($findOpen)") }
+    }
+}
+
+private const val FLOW_POLL_DEBOUNCE_MS = 120L
+private const val FLOW_READY_POLL_MS = 150L
 
 /** 隐藏 / 恢复系统状态栏和导航栏；离开阅读页时一定恢复 */
 @Composable
@@ -470,7 +573,7 @@ private fun KeepScreenOn(on: Boolean) {
 }
 
 private fun chapterTitles(doc: OpenedDoc): List<String> = when (doc) {
-    is OpenedDoc.Txt -> doc.chapters.map { it.title }
+    is OpenedDoc.Txt -> doc.titles
     is OpenedDoc.Epub -> doc.chapters.map { it.title }
     is OpenedDoc.Single -> emptyList()
 }

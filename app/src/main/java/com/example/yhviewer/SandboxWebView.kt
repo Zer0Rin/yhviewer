@@ -89,9 +89,22 @@ sealed interface PageSource {
      * 同一目录树里的 CSS、图片、字体按相对路径从 rootDir 读取。
      */
     data class BundleFile(val rootDir: File, val relPath: String, val mainHtml: String) : PageSource
+
+    /**
+     * v11：章节连续滚动。外层页面（FlowShell）挂在 /flow/index.html，每章是一个沙箱 iframe：
+     * EPUB 章节从 epubRoot 挂在 /book/，TXT 章节由 txt 按需渲染挂在 /txt/<序号>.html。
+     * 外层页面需要脚本（只有我们自己的），书的内容一律不执行脚本。
+     */
+    data class Flow(
+        val shellHtml: String,
+        val epubRoot: File? = null,
+        val txt: TxtBook? = null,
+        val txtTemplate: String? = null,
+    ) : PageSource
 }
 
-internal fun PageSource.supportsTemplateUpdates(): Boolean = this is PageSource.Html || this is PageSource.BundleFile
+internal fun PageSource.supportsTemplateUpdates(): Boolean =
+    this is PageSource.Html || this is PageSource.BundleFile || this is PageSource.Flow
 
 /** v10：页面里的 alert / confirm / prompt，改用我们自己的对话框显示（标题写明来自哪个文档，避免伪装成系统提示） */
 sealed interface JsDialogRequest {
@@ -107,6 +120,14 @@ private fun noStoreResponse(mime: String?, encoding: String?, csp: String, body:
         mapOf("Content-Security-Policy" to csp, "Cache-Control" to "no-store"),
         body,
     )
+
+/** v11：连续滚动的外层页面 */
+private class FlowShellPathHandler(private val html: String) : WebViewAssetLoader.PathHandler {
+    override fun handle(path: String): WebResourceResponse? {
+        if (path != "index.html") return null
+        return noStoreResponse("text/html", "utf-8", FlowShell.SHELL_CSP, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
+    }
+}
 
 private class DocumentPathHandler(private val html: String, private val csp: String) : WebViewAssetLoader.PathHandler {
     override fun handle(path: String): WebResourceResponse? {
@@ -167,6 +188,25 @@ private class EpubPathHandler(
     }
 }
 
+/** v11：连续滚动里 TXT 的一章。在 WebView 的后台线程里按需读取、渲染 */
+private class TxtChapterPathHandler(
+    private val book: TxtBook,
+    private val template: String,
+    private val theme: () -> ReaderTheme,
+    private val readingCss: () -> String,
+) : WebViewAssetLoader.PathHandler {
+    override fun handle(path: String): WebResourceResponse? {
+        val index = path.removeSuffix(".html").toIntOrNull()?.takeIf { path.endsWith(".html") && it in 0 until book.size } ?: return null
+        val html = try {
+            TxtChapterPage.render(template, book.chapter(index), index, book.size, theme(), readingCss())
+        } catch (e: Exception) {
+            Log.w(Sandbox.TAG, "txt chapter $index failed", e)
+            return null
+        }
+        return noStoreResponse("text/html", "utf-8", Sandbox.BOOK_CSP, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
+    }
+}
+
 private class SandboxClient(
     private val loader: WebViewAssetLoader,
     private val permissions: DocPermissions,
@@ -179,6 +219,8 @@ private class SandboxClient(
     /** v10：页面引用了本地路径下不存在的文件（单文件导入的 HTML 引用同文件夹资源时就是这样） */
     private val onMissingLocal: (String) -> Unit = {},
     private val onPageLoading: () -> Unit = {},
+    /** v11：连续滚动。章节 iframe 可以加载 /book/、/txt/ 下的文件；用户点了章节里的链接交给 onInternalLink */
+    private val bookFrames: Boolean = false,
 ) : WebViewClient() {
 
     // 跑在后台线程，不能直接改 Compose 状态
@@ -199,8 +241,16 @@ private class SandboxClient(
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
         if (Sandbox.isLocal(url, localHost)) {
+            // The trusted shell never navigates. Even a top-targeted book link cannot replace it.
+            if (request.isForMainFrame) return bookFrames || onInternalLink(url)
+            val path = url.path.orEmpty()
+            if (bookFrames && (path.startsWith("/book/") || path.startsWith("/txt/"))) {
+                // 用户点的链接：交给阅读器跳转（换章），iframe 本身不导航；外层页面创建章节 iframe：放行
+                if (request.hasGesture()) { onInternalLink(url); return true }
+                return false
+            }
             // A child frame cannot navigate into private document endpoints.
-            return if (request.isForMainFrame) onInternalLink(url) else true
+            return true
         }
         if (url.host == Sandbox.HOST || url.host?.endsWith(".${Sandbox.HOST}") == true) return true
         return when (NavigationPolicy.decide(permissions, request.isForMainFrame, request.hasGesture(), url.scheme)) {
@@ -322,7 +372,7 @@ fun HtmlView(
     /** v10：页面弹窗对话框的标题，写明来源文档 */
     dialogSource: String = "页面",
 ) {
-    val effective = if (source is PageSource.BookFile) DocPermissions.STRICT else AppCapabilities.effective(permissions)
+    val effective = if (source is PageSource.BookFile || source is PageSource.Flow) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
     val touchCleanup = remember { mutableMapOf<WebView, () -> Unit>() }
     var webView by remember { mutableStateOf<WebView?>(null) }
@@ -365,7 +415,8 @@ fun HtmlView(
         }
         // Fresh documents already start at the top. A delayed scrollTo(0, 0) would overwrite
         // early page/script/user scrolling even when there was no saved position to restore.
-        if (target > 0f) view.restoreRatio(target) { position.epoch == epoch }
+        // v11：连续滚动的位置由外层页面自己维护（按章节 + 章内比例），这里不按整页比例恢复
+        if (target > 0f && source !is PageSource.Flow) view.restoreRatio(target) { position.epoch == epoch }
         if (position.epoch == epoch) {
             position.ratio = view.scrollRatio()
             position.initialized = true
@@ -422,10 +473,21 @@ fun HtmlView(
                         )
                         bundleUrl(localHost, source.relPath)
                     }
+                    is PageSource.Flow -> {
+                        builder.addPathHandler("/flow/", FlowShellPathHandler(source.shellHtml))
+                        source.epubRoot?.let {
+                            builder.addPathHandler("/book/", EpubPathHandler(context, it, { latestBookTheme() }, { latestBookReading() }))
+                        }
+                        if (source.txt != null && source.txtTemplate != null) {
+                            builder.addPathHandler("/txt/", TxtChapterPathHandler(source.txt, source.txtTemplate, { latestBookTheme() }, { latestBookReading() }))
+                        }
+                        "https://$localHost/flow/index.html"
+                    }
                 }
                 val loader = builder.build()
                 view.apply {
-                    applySandboxSettings(allowJs = source !is PageSource.BookFile && effective.scripts)
+                    // v11：连续滚动的外层页面是我们自己的脚本；章节在沙箱 iframe 里，脚本被 sandbox 和 CSP 双重禁止
+                    applySandboxSettings(allowJs = source is PageSource.Flow || (source !is PageSource.BookFile && effective.scripts))
                     // v10：页面弹窗。不设置 WebChromeClient 时 alert() 会被静默丢弃，用户以为按钮坏了
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         private fun show(req: JsDialogRequest): Boolean {
@@ -473,6 +535,7 @@ fun HtmlView(
                             val path = uri.path.orEmpty()
                             if (path.startsWith("/book/")) latestOnLink(path.removePrefix("/book/"), uri.fragment) else false
                         },
+                        bookFrames = source is PageSource.Flow,
                     )
                     setOnScrollChangeListener { _, _, _, _, _ ->
                         if (position.reporting) {

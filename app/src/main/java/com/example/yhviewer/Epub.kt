@@ -308,7 +308,8 @@ object EpubInjector {
 
     fun inject(xhtml: String, theme: ReaderTheme, readingCss: String = ""): String {
         require('<' !in readingCss && '&' !in readingCss) { "Unsafe reading CSS for XHTML" }
-        val styles = (if (readingCss.isEmpty()) "" else "<style type=\"text/css\">$readingCss</style>") + LINKS
+        // v11：固定带 id，连续滚动时外层页面直接替换这段样式（字号、行距实时生效，不重新加载）
+        val styles = "<style id=\"yh-reading\" type=\"text/css\">$readingCss</style>" + LINKS
         val htmlTag = HTML_TAG.find(xhtml) ?: return xhtml
         val attr = " data-theme=\"${theme.id}\""
         val newTag = if (DATA_THEME.containsMatchIn(htmlTag.value)) {

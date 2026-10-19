@@ -33,8 +33,10 @@ internal data class StagedBundleDocument(
 /** Visible heading and trimmed nonempty paragraphs in assets/book/txt.html. */
 internal object TxtSearchText {
     private val edges = Regex("^[\\s\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]+|[\\s\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]+$")
-    fun rendered(title: String, text: String): String =
-        (listOf(title) + text.split(Regex("\\r?\\n")).map { it.replace(edges, "") }.filter { it.isNotEmpty() }).joinToString("\n")
+    private val lineBreak = Regex("\\r?\\n")
+    /** v11：连续滚动的章节页（TxtChapterPage）用同一套分段规则，保证搜索序号和页面一致 */
+    fun paragraphs(text: String): List<String> = text.split(lineBreak).map { it.replace(edges, "") }.filter { it.isNotEmpty() }
+    fun rendered(title: String, text: String): String = (listOf(title) + paragraphs(text)).joinToString("\n")
 }
 
 /** At most one queued UI callback, bounded representatives and one overflow marker. */

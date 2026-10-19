@@ -426,7 +426,36 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         chapterAnchor = anchor
         chapter = index
         ratio = if (atEnd) 1f else 0f
+        jumpTick++ // v11：连续滚动模式不按章节号重建页面，靠 jumpTick 表示"主动跳转"
         flushPosition()
+    }
+
+    /**
+     * v11：连续滚动时页面报告的位置（视口所在章节 + 章内比例）。只更新状态和保存进度，不触发重建；
+     * 顶栏标题、底部章节号、目录高亮都跟着变。
+     */
+    fun onFlowPosition(forSession: Int, forChapter: Int, r: Float, forJump: Int = jumpTick) {
+        if (forSession != documentSession || forJump != jumpTick || !r.isFinite()) return
+        val doc = current() ?: return
+        if (forChapter !in 0 until doc.chapterCount) return
+        if (forChapter != chapter) {
+            chapter = forChapter
+            chapterAnchor = null
+        }
+        onScroll(forSession, forChapter, r)
+    }
+
+    /** v11：连续滚动里点了章节内的链接。目标在目录里就跳过去（同一章也跳，用于脚注锚点） */
+    fun onFlowLink(path: String, fragment: String?): Boolean {
+        val doc = current() as? OpenedDoc.Epub ?: return false
+        val index = doc.chapters.indexOfFirst { it.path == path }
+        if (index < 0) return false
+        chapterAnchor = fragment
+        chapter = index
+        ratio = 0f
+        jumpTick++
+        flushPosition()
+        return true
     }
 
     fun nextChapter() = goToChapter(chapter + 1)

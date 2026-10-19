@@ -17,6 +17,8 @@ import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +31,10 @@ class ReaderIntegrationTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+
+    private lateinit var legacyChapterMode: LegacyChapterMode
+    @Before fun legacyMode() { legacyChapterMode = LegacyChapterMode(context) }
+    @After fun restoreMode() { legacyChapterMode.restore() }
 
     private fun document(name: String, mime: String, bytes: ByteArray): Uri {
         val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,

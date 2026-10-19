@@ -71,7 +71,7 @@ class ReadingPrefsTest {
         val xhtml = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body/></html>"
         val css = ReadingPrefs(margin = 32).toCss()
         val out = EpubInjector.inject(xhtml, ReaderTheme.INK, css)
-        assertTrue(out.contains("<style type=\"text/css\">$css</style>${EpubInjector.LINKS}</head>"))
+        assertTrue(out.contains("<style id=\"yh-reading\" type=\"text/css\">$css</style>${EpubInjector.LINKS}</head>"))
     }
 
     @Test(expected = IllegalArgumentException::class)

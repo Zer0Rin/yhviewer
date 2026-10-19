@@ -32,6 +32,7 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class V3ReadingIntegrationTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -40,10 +41,12 @@ class V3ReadingIntegrationTest {
     private val created = mutableListOf<Uri>()
 
     @Before fun prepare() {
+        legacyChapterMode = LegacyChapterMode(context)
         oldPrefs = prefs.all.toMap()
-        ReadingPrefsStore(context).save(ReadingPrefs())
+        ReadingPrefsStore(context).save(ReadingPrefs(continuous = false))
     }
     @After fun restore() {
+        legacyChapterMode.restore()
         runBlocking {
             val repo = ShelfRepository(context, AppDatabase.get(context))
             created.forEach { uri ->
@@ -176,7 +179,7 @@ class V3ReadingIntegrationTest {
             ready(s)
             var originalKeep = false
             s.onActivity { originalKeep=it.window.decorView.keepScreenOn }
-            s.onActivity { a -> ViewModelProvider(a)[ShelfViewModel::class.java].updateReading(ReadingPrefs(tapToTurn=false, keepScreenOn=true)) }
+            s.onActivity { a -> ViewModelProvider(a)[ShelfViewModel::class.java].updateReading(ReadingPrefs(tapToTurn=false, keepScreenOn=true, continuous=false)) }
             compose.waitForIdle()
             scroll(s, .3f)
             tap(s, .9f)

@@ -130,6 +130,7 @@ fun ReaderSettingsSheet(
                 }
             }
 
+            SwitchRow("章节连续滚动", reading.continuous) { onReading(reading.copy(continuous = it)) }
             SwitchRow("点击屏幕左右两侧翻页", reading.tapToTurn) { onReading(reading.copy(tapToTurn = it)) }
             SwitchRow("阅读时屏幕常亮", reading.keepScreenOn) { onReading(reading.copy(keepScreenOn = it)) }
         }

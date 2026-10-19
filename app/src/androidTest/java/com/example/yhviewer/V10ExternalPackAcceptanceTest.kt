@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit
 @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
 @RunWith(AndroidJUnit4::class)
 class V10ExternalPackAcceptanceTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -39,13 +40,16 @@ class V10ExternalPackAcceptanceTest {
     private fun uri(path: String, root: String = "generic") = DocumentsContract.buildDocumentUriUsingTree(tree(root), "$root:$path")
     private fun owned(): List<Book> = runBlocking { repo.observe("", false).first().filter { it.sourceUri.startsWith(base.toString()) } }
     @Before fun setUp() {
+        legacyChapterMode = LegacyChapterMode(context)
         owned().forEach { runBlocking { repo.delete(it.id) } }
         // Bootstrap the test-APK provider as the shell document picker would, then drop identity.
         instrumentation.uiAutomation.adoptShellPermissionIdentity(android.Manifest.permission.MANAGE_DOCUMENTS)
         try { assertTrue(context.contentResolver.call(base, "fixtureReset", null, null)!!.getBoolean("ready")) }
         finally { instrumentation.uiAutomation.dropShellPermissionIdentity() }
     }
-    @After fun tearDown() { owned().forEach { runBlocking { repo.delete(it.id) } } }
+    @After fun tearDown() {
+        legacyChapterMode.restore()
+        owned().forEach { runBlocking { repo.delete(it.id) } } }
     private fun launch(intent: Intent = Intent(context, MainActivity::class.java)) = ActivityScenario.launch<MainActivity>(intent)
     private fun model(s: ActivityScenario<MainActivity>, action: (ShelfViewModel) -> Unit) {
         s.onActivity { action(ViewModelProvider(it)[ShelfViewModel::class.java]) }; compose.waitForIdle()
@@ -251,7 +255,7 @@ class V10ExternalPackAcceptanceTest {
         assertEquals(3, titleHits.size)
         val id = runBlocking { repo.import(uri("review.txt")) }
         val doc = runBlocking { repo.open(id) as OpenedDoc.Txt }
-        assertEquals(1, doc.chapters.size)
+        assertEquals(1, doc.chapterCount)
         val hits = BookSearch.search(runBlocking { repo.chapterTexts(doc) }, "needle")
         assertEquals(120, hits.size)
         launch().use { s ->

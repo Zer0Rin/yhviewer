@@ -43,6 +43,7 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class V2ReaderIntegrationTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -54,14 +55,16 @@ class V2ReaderIntegrationTest {
     private var oldWrap: Boolean? = null
 
     @Before fun prepare() {
+        legacyChapterMode = LegacyChapterMode(context)
         oldReading = ReadingPrefsStore(context).load()
-        ReadingPrefsStore(context).save(ReadingPrefs())
+        ReadingPrefsStore(context).save(ReadingPrefs(continuous = false))
         oldTheme = prefs.getString("md_theme", null)
         oldWrap = if (prefs.contains("code_wrap")) prefs.getBoolean("code_wrap", false) else null
         assertTrue(prefs.edit().putString("md_theme", "paper").putBoolean("code_wrap", false).commit())
     }
     @After fun clean() {
         ReadingPrefsStore(context).save(oldReading)
+        legacyChapterMode.restore()
         runBlocking {
             val repo = ShelfRepository(context, AppDatabase.get(context))
             created.forEach { uri ->
@@ -309,7 +312,7 @@ class V2ReaderIntegrationTest {
             var before: WebView? = null
             var previousHeight = 0
             s.onActivity { a -> before=web(a.window.decorView);previousHeight=before!!.contentHeight
-                ViewModelProvider(a)[ShelfViewModel::class.java].updateReading(ReadingPrefs(fontScale=150)) }
+                ViewModelProvider(a)[ShelfViewModel::class.java].updateReading(ReadingPrefs(fontScale=150, continuous=false)) }
             compose.waitUntil(20_000) {
                 var reflowed=false
                 s.onActivity { a -> val w=web(a.window.decorView)
