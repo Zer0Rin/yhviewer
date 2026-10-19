@@ -102,6 +102,10 @@ class V11FlowAcceptanceTest {
     private fun ready(s: ActivityScenario<MainActivity>, expectedStart: Int? = null, previousView: WebView? = null) {
         compose.waitUntil(25_000) { runCatching { (previousView == null || view(s) !== previousView) &&
             (expectedStart == null || js(s, "JSON.parse(document.getElementById('payload').textContent).start") == expectedStart.toString()) && js(s, "!!window.YH && YH.state()!=='' && [...document.querySelectorAll('iframe')].every(f=>f.contentDocument && f.contentDocument.readyState==='complete' && f.offsetHeight>0)") == "true" }.getOrDefault(false) }
+        // DOM readiness can precede the Compose effect's poll timeout. Drain
+        // that queued work before tests drive WebView outside Compose actions.
+        compose.mainClock.advanceTimeBy(400)
+        compose.waitForIdle()
         bounded(s)
     }
     private fun open(s: ActivityScenario<MainActivity>, id: Long) {
@@ -129,6 +133,8 @@ class V11FlowAcceptanceTest {
     private fun nativeScroll(s: ActivityScenario<MainActivity>, direction: Int) {
         s.onActivity { checkNotNull(web(it.window.decorView)).apply { scrollBy(0, direction * height / 2) } }
         SystemClock.sleep(150)
+        compose.mainClock.advanceTimeBy(400)
+        compose.waitForIdle()
         bounded(s)
     }
     private fun scrollUntilChapter(s: ActivityScenario<MainActivity>, target: Int, direction: Int) {
@@ -154,7 +160,12 @@ class V11FlowAcceptanceTest {
         runBlocking { repo.savePosition(id, Locator(5, .4f), 12) }
         launch().use { s ->
             open(s, id)
-            scrollUntilChapter(s, 6, 1)
+            try {
+                scrollUntilChapter(s, 6, 1)
+            } catch (failure: Throwable) {
+                val outer = runCatching { string(s, "JSON.stringify({ready:document.readyState,url:location.href,scrollY:scrollY,innerHeight:innerHeight,scrollHeight:document.documentElement.scrollHeight,frames:[...document.querySelectorAll('section')].map(s=>({chapter:s.dataset.ch,top:s.offsetTop,height:s.offsetHeight,frameReady:s.querySelector('iframe')?.contentDocument?.readyState}))})") }.getOrElse { "unavailable: $it" }
+                throw AssertionError("Auto-save boundary diagnostics: outer=$outer", failure)
+            }
             val expected = state(s)
             // No flushPosition: the ordinary 800 ms idle debounce must finish
             // even while the reader keeps polling for iframe link clicks.
@@ -567,7 +578,7 @@ class V11FlowAcceptanceTest {
             val hit = runBlocking { checkNotNull(vm).searchBook(needle) }.single()
             assertTrue("Marker exercises a middle fallback part", hit.chapter > 0 && hit.chapter < indexed.chapterCount - 1)
             model(s) { it.openHit(hit, needle, 0) }
-            ready(s)
+            ready(s, expectedStart = hit.chapter)
             waitText("1/1")
             assertEquals(hit.chapter, chapter(s))
             assertEquals("Target fallback part is the only find frame", "[${hit.chapter}]", frames(s).toString())
