@@ -523,7 +523,9 @@ fun HtmlView(
                         localHost = localHost,
                         onHistoryChanged = { canGoBack = it },
                         onExternalLink = { uri -> openExternal(context, uri) },
-                        onPageLoaded = { pageLoads++; latestOnPageReady() },
+                        // FlowContent waits for the first chapter and applies
+                        // native hold before replaying a pending nth Find.
+                        onPageLoaded = { pageLoads++; if (source !is PageSource.Flow) latestOnPageReady() },
                         onPageLoading = { latestOnPageLoading() },
                         onMissingLocal = { path ->
                             if (missing.add(path)) post { latestOnMissing(missing.drainNotification()) }

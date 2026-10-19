@@ -39,7 +39,9 @@
     var continuation = document.getElementById('continuation');
     var MAX = 5;                 // 同时保留的章节数
     var secs = [];               // 按章节顺序：{ i, el, frame, h, loaded }
-    var ready = false, hold = !!P.hold, busy = null, ticking = false;
+    // Do not grow the searchable frame window before native has synchronized
+    // the latest Find/pending-hit state. The payload may predate opening Find.
+    var ready = false, hold = true, busy = null, ticking = false;
     var pendingLink = '';
     var target = { i: P.start, ratio: P.ratio || 0, anchor: P.anchor || null };
     var theme = document.documentElement.getAttribute('data-theme');

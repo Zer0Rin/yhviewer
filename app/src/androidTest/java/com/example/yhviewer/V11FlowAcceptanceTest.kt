@@ -334,6 +334,27 @@ class V11FlowAcceptanceTest {
 
     @Test fun txtActualFlowNativeFindTargetsThirdHitAndHoldsFill() = find(false)
     @Test fun epubActualFlowNativeFindTargetsThirdHitAndHoldsFill() = find(true)
+    @Test fun findOpenedBeforeShellApiExistsHoldsUntilClose() {
+        val id = runBlocking { fixtures.import(fixtures.txt()) }
+        runBlocking { repo.savePosition(id, Locator(5, .9f), 12) }
+        launch().use { s ->
+            open(s, id)
+            val shellUrl = checkNotNull(url(s))
+            // Control the WebView load gap: Find opens while no YH API exists.
+            s.onActivity { checkNotNull(web(it.window.decorView)).loadUrl("about:blank") }
+            compose.waitUntil(10_000) { runCatching { url(s) == "about:blank" && js(s, "typeof window.YH") == "\"undefined\"" }.getOrDefault(false) }
+            compose.onNodeWithText("搜索").performClick()
+            s.onActivity { checkNotNull(web(it.window.decorView)).loadUrl(shellUrl) }
+            ready(s)
+            assertEquals("Find starts with the target chapter alone", 1, js(s, "document.querySelectorAll('iframe').length").toInt())
+            js(s, "window.scrollTo(0,document.querySelector('section').offsetHeight-innerHeight+100)")
+            SystemClock.sleep(1300) // More than three shell layout intervals.
+            assertEquals("Early Find freezes chapter additions", 1, js(s, "document.querySelectorAll('iframe').length").toInt())
+            compose.onNodeWithText("关闭").performClick()
+            compose.waitUntil(10_000) { js(s, "document.querySelectorAll('iframe').length").toInt() > 1 }
+            bounded(s)
+        }
+    }
     private fun find(epub: Boolean) {
         val id = runBlocking { fixtures.import(if (epub) fixtures.epub() else fixtures.txt()) }
         launch().use { s ->
@@ -343,7 +364,19 @@ class V11FlowAcceptanceTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("无结果").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithText("1/3").fetchSemanticsNodes().isNotEmpty() }
             // Exercise real full-book search control, then select an actual repo search hit via VM.
             compose.onNodeWithText("全书").performClick()
-            waitText("「${V11GeneratedFixtures.NEEDLE}」共 36 处")
+            try {
+                waitText("「${V11GeneratedFixtures.NEEDLE}」共 36 处")
+            } catch (failure: Throwable) {
+                val ui = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrNull()
+                var vm: ShelfViewModel? = null
+                var bookId: Long? = null
+                model(s) {
+                    vm = it
+                    bookId = (it.reader as? ReaderState.Ready)?.doc?.bookId
+                }
+                val directHits = runCatching { runBlocking { checkNotNull(vm).searchBook(V11GeneratedFixtures.NEEDLE).size } }.getOrNull()
+                throw AssertionError("Whole-book result did not show 36: query=${V11GeneratedFixtures.NEEDLE} bookId=$bookId directHits=$directHits ui=$ui", failure)
+            }
             Espresso.pressBack()
             var vm: ShelfViewModel? = null; model(s) { vm = it }
             val hits = runBlocking { checkNotNull(vm).searchBook(V11GeneratedFixtures.NEEDLE) }

@@ -301,7 +301,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 handle = handle,
                 onPageReady = onPageReady,
                 onPageLoading = onPageLoading,
-                findOpen = find.open,
+                find = find,
             )
 
             AnimatedVisibility(
@@ -391,11 +391,11 @@ private fun BookContent(
     handle: WebViewHandle,
     onPageReady: () -> Unit,
     onPageLoading: () -> Unit,
-    findOpen: Boolean,
+    find: FindState,
 ) {
     // v11：默认章节连续滚动；Aa 里关掉则保持一章一页
     if (vm.reading.continuous && doc !is OpenedDoc.Single) {
-        FlowContent(vm, doc, gestures, modifier, handle, onPageReady, onPageLoading, findOpen)
+        FlowContent(vm, doc, gestures, modifier, handle, onPageReady, onPageLoading, find)
         return
     }
     val context = LocalContext.current
@@ -469,7 +469,7 @@ private fun FlowContent(
     handle: WebViewHandle,
     onPageReady: () -> Unit,
     onPageLoading: () -> Unit,
-    findOpen: Boolean,
+    find: FindState,
 ) {
     val context = LocalContext.current
     val session = vm.documentSession
@@ -481,7 +481,7 @@ private fun FlowContent(
             val shell = FlowShell.render(
                 Templates.get(context, FlowShell.TEMPLATE), vm.theme, doc.chapterCount,
                 vm.chapter.coerceIn(0, doc.chapterCount - 1), vm.initialRatio(), vm.chapterAnchor, urls,
-                hold = findOpen || vm.pendingFind != null,
+                hold = find.open || vm.pendingFind != null,
             )
             when (doc) {
                 is OpenedDoc.Epub -> PageSource.Flow(shell, epubRoot = doc.rootDir)
@@ -511,6 +511,7 @@ private fun FlowContent(
         LaunchedEffect(Unit) {
             var announced = false
             var lastReported: Pair<Int, Float>? = null
+            var appliedHold: Boolean? = null
             while (true) {
                 if (announced) {
                     // Native taps inside an iframe need not produce a parent scroll or
@@ -531,7 +532,16 @@ private fun FlowContent(
                     }
                 }
                 if (session != vm.documentSession || jump != vm.jumpTick) continue
-                val state = FlowShell.parseState(handle.evaluate("window.YH ? YH.state() : ''")) ?: continue
+                val state = FlowShell.parseState(handle.evaluate("window.YH ? YH.state() : ''"))
+                if (state == null) { appliedHold = null; continue }
+                val effectiveHold = find.open || vm.pendingFind != null
+                if (appliedHold != effectiveHold) {
+                    // state() confirms the first chapter is ready. Synchronize
+                    // hold before replaying native Find or allowing shell fill.
+                    val applied = handle.evaluate("window.YH && YH.state() ? (YH.hold($effectiveHold), true) : false")
+                    if (applied != "true") continue
+                    appliedHold = effectiveHold
+                }
                 if (!announced) {
                     announced = true
                     latestOnPageReady() // 搜索结果跳转后的高亮在这里重放：此时只有目标章已加载
@@ -544,8 +554,8 @@ private fun FlowContent(
                 }
             }
         }
-        // 查找栏打开时暂停补章，查找结果数不会中途变化
-        LaunchedEffect(findOpen) { handle.evaluate("window.YH && YH.hold($findOpen)") }
+        // Wake the synchronized hold loop on Find and pending-hit changes.
+        LaunchedEffect(find.open, vm.pendingFind) { ticks.trySend(Unit) }
     }
 }
 

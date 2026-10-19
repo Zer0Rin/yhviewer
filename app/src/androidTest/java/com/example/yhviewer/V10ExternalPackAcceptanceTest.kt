@@ -88,6 +88,11 @@ class V10ExternalPackAcceptanceTest {
         return result
     }
     private fun fire(s: ActivityScenario<MainActivity>, script: String) { s.onActivity { web(s)!!.evaluateJavascript(script, null) } }
+    private fun webState(s: ActivityScenario<MainActivity>): String {
+        var state = "missing"
+        s.onActivity { web(s)?.let { state = "view=${System.identityHashCode(it)} focus=${it.isFocused} windowFocus=${it.hasWindowFocus()} scrollY=${it.scrollY} visible=${it.isShown}" } }
+        return state
+    }
     private fun waitText(text: String) = compose.waitUntil(30_000) { compose.onAllNodesWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
     private fun capture(name: String) {
         if (InstrumentationRegistry.getArguments().getString("v7Screenshots") != "true") return
@@ -329,10 +334,26 @@ class V10ExternalPackAcceptanceTest {
                 if (book.name.startsWith("02_") && book.type == DocType.HTML) {
                     // Native find may still apply its selected-hit scroll after the
                     // completion callback. Release that state before positioning H02's link.
+                    val beforeClear = webState(s)
                     s.onActivity { web(s)!!.apply { clearMatches(); setFindListener(null) } }
                     assertEquals("true", eval(s, "document.images.length>0 && [...document.images].every(i=>i.complete&&i.naturalWidth>0)"))
                     assertEquals("\"rgb(230, 246, 239)\"", eval(s, "getComputedStyle(document.querySelector('.external-css-marker')).backgroundColor"))
                     val targetMetrics = """(()=>{const a=[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文'));if(!a)return {missing:true};const r=a.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y)?.closest('a');return {url:location.href,scrollX,scrollY,innerWidth,innerHeight,devicePixelRatio,visualViewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetLeft:visualViewport.offsetLeft,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rect:[r.x,r.y,r.width,r.height],clientRects:[...a.getClientRects()].map(r=>[r.x,r.y,r.width,r.height]),targetHref:a.href,hitHref:h?.href||null,pointInside:x>=0&&y>=0&&x<innerWidth&&y<innerHeight}})()"""
+                    var focusRequested = false
+                    s.onActivity { focusRequested = web(s)!!.requestFocus() }
+                    awaitRenderedWebView(instrumentation, checkNotNull(web(s)))
+                    // Focus restored the old native find hit and started a WebView
+                    // scroll in API 37. Let that movement finish before placing
+                    // the visible link; otherwise it can overtake one real tap.
+                    var lastFocusSample = ""
+                    var stableSince = android.os.SystemClock.uptimeMillis()
+                    compose.waitUntil(10_000) {
+                        val sample = webState(s) + " domScroll=" + eval(s, "scrollY")
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (sample != lastFocusSample) { lastFocusSample = sample; stableSince = now }
+                        now - stableSince >= 450
+                    }
+                    android.util.Log.i("V10Pack", "H02 beforeClear=$beforeClear focusRequested=$focusRequested afterFocus=${webState(s)}")
                     val beforeScroll = eval(s, targetMetrics)
                     eval(s, "[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文')).scrollIntoView({block:'center'}); true")
                     var stableMetrics: org.json.JSONObject? = null
@@ -349,8 +370,11 @@ class V10ExternalPackAcceptanceTest {
                     val afterScroll = checkNotNull(stableMetrics)
                     val rect = afterScroll.getJSONArray("rect")
                     val point = org.json.JSONArray().put(rect.getDouble(0) + rect.getDouble(2) / 2).put(rect.getDouble(1) + rect.getDouble(3) / 2)
-                    val touchMetrics = tapRenderedWebViewPoint(instrumentation, checkNotNull(web(s)), point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
-                    android.util.Log.i("V10Pack", "H02 tap before=$beforeScroll after=$afterScroll native=$touchMetrics")
+                    val beforeTap = webState(s)
+                    val touchMetrics = tapRenderedWebViewPoint(instrumentation, checkNotNull(web(s)), point.getDouble(0).toFloat(), point.getDouble(1).toFloat()) { action, native ->
+                        android.util.Log.i("V10Pack", "H02 afterAction=$action $native")
+                    }
+                    android.util.Log.i("V10Pack", "H02 tap beforeClear=$beforeClear beforeTap=$beforeTap before=$beforeScroll after=$afterScroll native=$touchMetrics")
                     var navigationState = ""
                     try {
                         compose.waitUntil(15_000) {

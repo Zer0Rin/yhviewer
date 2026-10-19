@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync(process.env.FLOW_SHELL_PATH || 'app/src/main/assets/book/flow.html', 'utf8');
 const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].at(-1)[1];
-function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html') {
+function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeHandshake = true) {
   const jobs = [], intervals = [], events = {}, seen = new Set();
   const baseHeights = heights.slice();
   let requests = 0, maxFrames = 0;
@@ -79,9 +79,24 @@ function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html') {
   function pump() { let n = 0; while (jobs.length) { assert(++n < 1000, 'unbounded load/evict loop'); jobs.shift()(); } checkFrames(); }
   function tick() { intervals.forEach(fn => fn()); pump(); }
   pump(); tick();
+  if (nativeHandshake) { window.YH.hold(false); tick(); }
   return { window, flow, start, seen, heights, tick, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
     state() { return window.YH.state().split(',').map(Number); },
     requests: () => requests, maxFrames: () => maxFrames };
+}
+{
+  // Native can request Find before YH exists. The shell must remain held
+  // during that load gap, then honor the latest native hold and resume on close.
+  const earlyYH = undefined;
+  assert.equal(earlyYH?.hold(true), undefined);
+  const s = shell(Array(12).fill(1600), 5, .9, '/txt/{i}.html', false);
+  assert.equal(s.flow.children.length, 1, 'unacknowledged shell cannot add chapters');
+  s.window.YH.hold(true);
+  s.scroll(s.window.scrollY + 80);
+  assert.equal(s.flow.children.length, 1, 'early Find keeps corpus fixed after shell readiness');
+  s.window.YH.hold(false);
+  s.tick();
+  assert(s.flow.children.length > 1, 'closing Find resumes chapter additions');
 }
 function link(s, href, attrs = {}, options = {}) {
   const d = s.flow.children.find(e => e.attrs['data-ch'] === String(s.start)).children[0].contentDocument;

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** DOM evaluation does not mean the compositor has drawn its new hit-test geometry. */
-internal fun tapRenderedWebViewPoint(instrumentation: Instrumentation, view: WebView, cssX: Float, cssY: Float): String {
+internal fun awaitRenderedWebView(instrumentation: Instrumentation, view: WebView) {
     val drawn = CountDownLatch(1)
     val active = AtomicBoolean(true)
     var listener: ViewTreeObserver.OnDrawListener? = null
@@ -40,6 +40,17 @@ internal fun tapRenderedWebViewPoint(instrumentation: Instrumentation, view: Web
             listener?.let { if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnDrawListener(it) }
         }
     }
+}
+
+/** One actual native pointer transaction at a visually committed CSS point. */
+internal fun tapRenderedWebViewPoint(
+    instrumentation: Instrumentation,
+    view: WebView,
+    cssX: Float,
+    cssY: Float,
+    onAction: ((Int, String) -> Unit)? = null,
+): String {
+    awaitRenderedWebView(instrumentation, view)
     var screenX = 0f
     var screenY = 0f
     var metrics = ""
@@ -61,6 +72,13 @@ internal fun tapRenderedWebViewPoint(instrumentation: Instrumentation, view: Web
     for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
         val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, screenX, screenY, 0)
         try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+        if (onAction != null) {
+            var state = ""
+            instrumentation.runOnMainSync {
+                state = "focus=${view.isFocused} windowFocus=${view.hasWindowFocus()} scrollY=${view.scrollY} visible=${view.isShown}"
+            }
+            onAction(action, state)
+        }
     }
     return metrics
 }
