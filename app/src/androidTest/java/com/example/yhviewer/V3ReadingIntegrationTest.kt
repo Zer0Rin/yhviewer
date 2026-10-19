@@ -94,9 +94,31 @@ class V3ReadingIntegrationTest {
         assertTrue(done.await(5, TimeUnit.SECONDS))
         return result
     }
+    private fun readyView(s: ActivityScenario<MainActivity>): WebView {
+        var ready: WebView? = null
+        compose.waitUntil(25_000) {
+            val done = CountDownLatch(1)
+            s.onActivity { a ->
+                val model = ViewModelProvider(a)[ShelfViewModel::class.java]
+                val chapter = model.chapter
+                val view = web(a.window.decorView)
+                if (view == null || view.contentHeight <= 1000 || view.width <= 0) done.countDown()
+                else {
+                    val title = MarkdownRenderer.toJsonString("第${chapter + 1}章 阅读")
+                    view.evaluateJavascript("!!window.setReading && document.readyState === 'complete' && document.querySelectorAll('p').length > 50 && document.getElementById('title').textContent === $title") { value ->
+                        if (value == "true" && web(a.window.decorView) === view && model.chapter == chapter) ready = view
+                        done.countDown()
+                    }
+                }
+            }
+            assertTrue("current chapter DOM readiness callback", done.await(5, TimeUnit.SECONDS))
+            ready != null
+        }
+        return ready!!
+    }
+
     private fun ready(s: ActivityScenario<MainActivity>) {
-        compose.waitUntil(25_000) { js(s, "!!window.setReading && document.querySelectorAll('p').length>50") == "true" }
-        compose.waitUntil(10_000) { var yes = false; s.onActivity { a -> yes = web(a.window.decorView)!!.contentHeight > 1000 }; yes }
+        readyView(s)
         // Initial layout restores only after three stable height samples.
         instrumentation.waitForIdleSync()
         compose.waitUntil(10_000) {
@@ -108,6 +130,7 @@ class V3ReadingIntegrationTest {
         scroll(s, 0f)
     }
     private fun tap(s: ActivityScenario<MainActivity>, x: Float, double: Boolean = false, hold: Boolean = false) {
+        readyView(s)
         val duration = if (hold) ViewConfiguration.getLongPressTimeout() + 100L else 30L
         repeat(if (double) 2 else 1) {
             s.onActivity { a -> web(a.window.decorView)!!.let { w ->
@@ -125,10 +148,14 @@ class V3ReadingIntegrationTest {
         }
         Thread.sleep(ViewConfiguration.getDoubleTapTimeout() + 200L)
     }
-    private fun scroll(s: ActivityScenario<MainActivity>, ratio: Float) = s.onActivity { a -> web(a.window.decorView)!!.let { w ->
-        @Suppress("DEPRECATION") val range = (w.contentHeight*w.scale).roundToInt()-w.height
-        w.scrollTo(0, (range*ratio).roundToInt())
-    } }
+    private fun scroll(s: ActivityScenario<MainActivity>, ratio: Float) {
+        val view = readyView(s)
+        s.onActivity { a ->
+            assertSame("scroll current ready chapter view", view, web(a.window.decorView))
+            @Suppress("DEPRECATION") val range = (view.contentHeight * view.scale).roundToInt() - view.height
+            view.scrollTo(0, (range * ratio).roundToInt())
+        }
+    }
 
     @Test fun centerTapKeepsViewportAndRatioAndReadingStyleKeepsSameWebView() {
         launch().use { s ->
@@ -169,7 +196,7 @@ class V3ReadingIntegrationTest {
             ready(s)
             tap(s, .1f)
             compose.waitUntil(10_000) { var end=false; s.onActivity { a ->
-                end=ViewModelProvider(a)[ShelfViewModel::class.java].chapter==0 && web(a.window.decorView)!!.scrollRatio()>.97f
+                end=ViewModelProvider(a)[ShelfViewModel::class.java].chapter==0 && (web(a.window.decorView)?.scrollRatio() ?: 0f)>.97f
             }; end }
         }
     }

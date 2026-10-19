@@ -230,7 +230,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         if (index !in 0 until doc.chapterCount) return
         chapterAnchor = null
         chapter = index
-        ratio = if (r.isFinite()) r.coerceIn(0f, 1f) else 0f
+        ratio = if (r.isFinite()) (if (reading.continuous && doc !is OpenedDoc.Single) r.coerceAtLeast(0f) else r.coerceIn(0f, 1f)) else 0f
         jumpTick++
         flushPosition()
     }
@@ -386,7 +386,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
                 val doc = block()
                 chapter = doc.locator.chapter.coerceIn(0, doc.chapterCount - 1)
                 // 书变短了（重新导入）导致章节号被修正时，章内比例也作废
-                ratio = if (doc.locator.chapter == chapter) doc.locator.ratio else 0f
+                ratio = if (doc.locator.chapter == chapter) {
+                    if (reading.continuous && doc !is OpenedDoc.Single) doc.locator.flowRatio ?: doc.locator.ratio else doc.locator.ratio
+                } else 0f
                 ReaderState.Ready(doc)
             } catch (e: CancellationException) {
                 throw e
@@ -400,11 +402,11 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
      * WebView 滚动回调。带上"这是哪一章的滚动"：切章瞬间旧 WebView 可能还会发一两个滚动事件，
      * 不过滤的话会把旧章节的比例写到新章节上。
      */
-    fun onScroll(forSession: Int, forChapter: Int, r: Float) {
+    fun onScroll(forSession: Int, forChapter: Int, r: Float, flow: Boolean = false) {
         if (forSession != documentSession || forChapter != chapter) return
         val doc = current() ?: return
-        ratio = if (r.isFinite()) r.coerceIn(0f, 1f) else 0f
-        val locator = Locator(chapter, ratio)
+        ratio = if (r.isFinite()) (if (flow) r.coerceAtLeast(0f) else r.coerceIn(0f, 1f)) else 0f
+        val locator = currentLocator()
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(800) // 防抖：停止滚动 0.8 秒后才写库
@@ -412,11 +414,14 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun currentLocator() = Locator(chapter, ratio.coerceIn(0f, 1f),
+        ratio.takeIf { reading.continuous && current() !is OpenedDoc.Single && it > 1f })
+
     /** 立即保存（离开阅读页、切章、App 进入后台时调用） */
     fun flushPosition() {
         val doc = current() ?: return
         saveJob?.cancel()
-        val locator = Locator(chapter, ratio)
+        val locator = currentLocator()
         PositionWrites.enqueue(repo, doc.bookId, locator, doc.chapterCount)
     }
 
@@ -442,7 +447,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
             chapter = forChapter
             chapterAnchor = null
         }
-        onScroll(forSession, forChapter, r)
+        onScroll(forSession, forChapter, r, flow = true)
     }
 
     /** v11：连续滚动里点了章节内的链接。目标在目录里就跳过去（同一章也跳，用于脚注锚点） */

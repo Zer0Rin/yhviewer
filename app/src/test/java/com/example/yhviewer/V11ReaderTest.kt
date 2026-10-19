@@ -203,7 +203,7 @@ class FlowShellTest {
 
     @Test fun parsesState() {
         assertEquals(12 to 0.5f, FlowShell.parseState("\"12,0.5000\""))
-        assertEquals(0 to 1f, FlowShell.parseState("\"0,1.7\""))
+        assertEquals(0 to 1.7f, FlowShell.parseState("\"0,1.7\""))
         assertNull(FlowShell.parseState("\"\""))
         assertNull(FlowShell.parseState("null"))
         assertNull(FlowShell.parseState(null))
@@ -211,6 +211,21 @@ class FlowShellTest {
         assertNull(FlowShell.parseState("\"-1,0.1\""))
         assertNull(FlowShell.parseState("\"3,NaN\""))
         assertNull(FlowShell.parseState("not json"))
+    }
+
+    @Test fun extendedFlowOffsetsPreserveLegacyLocators() {
+        assertEquals(Locator(2, 1f), Locator.decode("2:1.7000"))
+        val tail = Locator(2, 1f, 1.7f)
+        assertEquals("2:1.0000:flow=1.7000", tail.encode())
+        assertEquals(tail, Locator.decode(tail.encode()))
+        assertEquals(Locator(2, .5f), Locator.decode("2:0.5000:flow=NaN"))
+        assertEquals(Locator(2, .5f), Locator.decode("2:0.5000:flow=Infinity"))
+        assertEquals(Locator(2, .5f), Locator.decode("2:0.5000:flow=-1"))
+        assertEquals(Locator(2, .5f), Locator.decode("2:0.5000:unknown"))
+        val rendered = FlowShell.render(template, ReaderTheme.PAPER, 4, 2, 1.7f, null, null)
+        assertTrue(rendered.contains("\"ratio\":1.7000"))
+        assertEquals(.75f, tail.overallProgress(4), .0001f)
+        assertTrue(BookmarkRules.label("chapter", "book", 1.7f).contains("100%"))
     }
 
     @Test fun bookPathEncodesEachSegment() {

@@ -21,6 +21,7 @@ data class Bookmark(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val bookId: Long,
     val chapter: Int,
+    /** Legacy 0..1 scroll ratio; continuous tail/gap offsets may exceed 1. Labels clamp separately. */
     val ratio: Float,
     /** 列表里显示的文字：章节名（书）或文档名，后面跟百分比 */
     val label: String,

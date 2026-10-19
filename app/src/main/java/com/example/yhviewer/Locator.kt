@@ -8,9 +8,12 @@ import java.util.Locale
  *
  * 用比例而不是像素：换主题、换字号、横竖屏切换后，像素位置会失效，比例基本还能对上。
  */
-data class Locator(val chapter: Int = 0, val ratio: Float = 0f) {
+data class Locator(val chapter: Int = 0, val ratio: Float = 0f, val flowRatio: Float? = null) {
 
-    fun encode(): String = "$chapter:" + String.format(Locale.ROOT, "%.4f", ratio.coerceIn(0f, 1f))
+    // Old chapter:ratio retains exactly its meaning. Only continuous tail/gap offsets
+    // need this optional extension; single-page readers use the ordinary clamped ratio.
+    fun encode(): String = "$chapter:" + String.format(Locale.ROOT, "%.4f", ratio.coerceIn(0f, 1f)) +
+        (flowRatio?.takeIf { it.isFinite() && it > 1f }?.let { ":flow=" + String.format(Locale.ROOT, "%.4f", it) } ?: "")
 
     /** 全书进度 0..1，用于书架显示"读到 35%" */
     fun overallProgress(chapterCount: Int): Float {
@@ -29,7 +32,9 @@ data class Locator(val chapter: Int = 0, val ratio: Float = 0f) {
             val chapter = parts.getOrNull(0)?.toIntOrNull() ?: return START
             val ratio = parts.getOrNull(1)?.toFloatOrNull() ?: 0f
             if (chapter < 0 || ratio.isNaN()) return START
-            return Locator(chapter, ratio.coerceIn(0f, 1f))
+            val flow = parts.getOrNull(2)?.takeIf { it.startsWith("flow=") }?.removePrefix("flow=")
+                ?.toFloatOrNull()?.takeIf { it.isFinite() && it > 1f }
+            return Locator(chapter, ratio.coerceIn(0f, 1f), flow)
         }
     }
 }

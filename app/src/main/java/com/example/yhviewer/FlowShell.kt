@@ -50,7 +50,7 @@ object FlowShell {
         val payload = buildString {
             append("{\"count\":").append(count)
             append(",\"start\":").append(start)
-            append(",\"ratio\":").append(String.format(Locale.ROOT, "%.4f", if (ratio.isFinite()) ratio.coerceIn(0f, 1f) else 0f))
+            append(",\"ratio\":").append(String.format(Locale.ROOT, "%.4f", if (ratio.isFinite()) ratio.coerceAtLeast(0f) else 0f))
             append(",\"anchor\":").append(anchor?.let(j) ?: "null")
             append(",\"hold\":").append(hold)
             if (urls != null) {
@@ -73,7 +73,7 @@ object FlowShell {
         val chapter = parts[0].toIntOrNull() ?: return null
         val ratio = parts[1].toFloatOrNull()?.takeIf { it.isFinite() } ?: return null
         if (chapter < 0) return null
-        return chapter to ratio.coerceIn(0f, 1f)
+        return chapter to ratio.coerceAtLeast(0f)
     }
 
     /** EPUB 章节路径 → 外层页面里用的同源路径（每段 URL 编码；encode 由调用方传入，JVM 测试可替换） */

@@ -27,6 +27,7 @@
 </head>
 <body>
   <div id="flow"></div>
+  <div id="continuation" aria-hidden="true"></div>
 
   <!-- Kotlin 替换成 JSON：{"count": 120, "start": 3, "ratio": 0.4, "anchor": null, "urls": [...] 或 "pattern": "/txt/{i}.html"} -->
   <script type="application/json" id="payload">/*PAYLOAD*/</script>
@@ -35,6 +36,7 @@
     'use strict';
     var P = JSON.parse(document.getElementById('payload').textContent);
     var flow = document.getElementById('flow');
+    var continuation = document.getElementById('continuation');
     var MAX = 5;                 // 同时保留的章节数
     var secs = [];               // 按章节顺序：{ i, el, frame, h, loaded }
     var ready = false, hold = !!P.hold, busy = null, ticking = false;
@@ -69,14 +71,15 @@
     }
     function keep(a) { if (a && a.s.el.isConnected) window.scrollTo(0, top(a.s) + a.off); }
 
-    // 当前章：视口上方 1/4 处所在的章节；比例 = 视口顶部在本章内的位置（和单章模式含义一致）
+    // Persist the chapter at viewport top. Keep the legacy scrollable-height
+    // ratio, extending it above 1 only for continuous tail/gap offsets.
     function current() {
-      var probe = window.scrollY + vh() / 4, s = null;
+      var probe = window.scrollY, s = null;
       for (var k = 0; k < secs.length; k++) if (probe >= top(secs[k])) s = secs[k];
       s = s || secs[0];
       if (!s) return null;
       var r = (window.scrollY - top(s)) / Math.max(1, s.h - vh());
-      return { i: s.i, ratio: Math.max(0, Math.min(1, r)) };
+      return { i: s.i, ratio: Math.max(0, r), fraction: Math.max(0, (window.scrollY - top(s)) / Math.max(1, s.el.offsetHeight)) };
     }
 
     function scrollToChapter(i, ratio, anchor) {
@@ -167,6 +170,7 @@
       applyLive(s);
       fit([s], true);
       if (!ready) {
+        updateContinuation();
         scrollToChapter(target.i, target.ratio, target.anchor);
         ready = true;
       } else keep(a);
@@ -189,9 +193,17 @@
     }
 
     // 离底部不到两屏 → 补下一章；离顶部不到一屏 → 补上一章。一次只加载一章
+    function updateContinuation() {
+      // With <=5 tiny chapters, the window may be shorter than one viewport.
+      // A blank, nonsearchable runway lets its top anchor advance before eviction.
+      var last = secs[secs.length - 1];
+      continuation.style.height = last ? Math.max(0, vh() - (last.i === P.count - 1 ? last.el.offsetHeight : 0)) + 'px' : '0px';
+    }
+
     function fill() {
+      updateContinuation();
       if (!ready || hold || busy || !secs.length) return;
-      var y = window.scrollY, h = vh(), total = document.documentElement.scrollHeight;
+      var y = window.scrollY, h = vh(), total = flow.offsetHeight;
       var first = secs[0], last = secs[secs.length - 1];
       if (last.i < P.count - 1 && total - (y + h) < 2 * h && add(last.i + 1, false)) return;
       if (first.i > 0 && y < h) return add(first.i - 1, true);
@@ -199,9 +211,29 @@
 
     function relayout() {
       var c = ready ? current() : null;
+      var anchor = null, active = c && find(c.i), d = active && doc(active);
+      if (d && d.elementFromPoint) {
+        var offset = Math.max(0, window.scrollY - top(active));
+        var el = d.elementFromPoint((active.frame.clientWidth || window.innerWidth) / 2, offset);
+        if (el && el !== d.body && el !== d.documentElement) {
+          var rect = el.getBoundingClientRect();
+          if (rect.height > 0) anchor = { el: el, fraction: (offset - rect.top) / rect.height };
+        }
+      }
       secs.forEach(applyLive);
       fit(secs, true);
-      if (c) scrollToChapter(c.i, c.ratio, null);
+      updateContinuation();
+      if (c) {
+        var s = find(c.i);
+        if (s) {
+          var offset = c.fraction * s.el.offsetHeight;
+          if (anchor && anchor.el.isConnected) {
+            var rect = anchor.el.getBoundingClientRect();
+            offset = rect.top + anchor.fraction * rect.height;
+          }
+          window.scrollTo(0, top(s) + offset);
+        }
+      }
     }
 
     window.setTheme = function (t) {

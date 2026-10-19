@@ -340,10 +340,18 @@ class V10ExternalPackAcceptanceTest {
                             view.dispatchTouchEvent(event); event.recycle()
                         }
                     }
-                    compose.waitUntil(15_000) {
-                        var loaded = false
-                        s.onActivity { loaded = web(s)?.let { it.url.orEmpty().endsWith("03_English_navigation.html#chapter-two") && it.progress == 100 } == true }
-                        loaded
+                    var navigationState = ""
+                    try {
+                        compose.waitUntil(15_000) {
+                            var loaded = false
+                            s.onActivity { web(s)?.let {
+                                navigationState = "url=${it.url}, progress=${it.progress}, scrollY=${it.scrollY}, height=${it.height}, point=$point"
+                                loaded = it.url.orEmpty().endsWith("03_English_navigation.html#chapter-two") && it.progress == 100
+                            } }
+                            loaded
+                        }
+                    } catch (failure: Throwable) {
+                        throw AssertionError("H02 native link navigation: $navigationState", failure)
                     }
                     assertEquals("true", eval(s, "document.readyState==='complete' && !!document.getElementById('chapter-two')"))
                 }
