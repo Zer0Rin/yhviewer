@@ -102,6 +102,36 @@ const finalBefore = final.state(), finalY = final.window.scrollY;
 final.window.setTheme('ink'); final.window.setReading(':root{--read-scale:1}'); final.tick();
 assert(Math.abs(final.window.scrollY - finalY) < .01, 'final viewport live offset');
 assert.deepEqual(shell(Array(8).fill(1600), ...finalBefore).state(), finalBefore, 'final viewport reopen');
+// Reopen and bookmark jumps both supply chapter/ratio payloads. Cover offsets
+// inside tiny/medium/exact-height chapters and gaps, plus subpixel legacy spans.
+for (const height of [20, 400, 800, 800.5]) {
+  for (const chapter of [0, 4, 7]) {
+    for (const offset of [.5, 10, 18, height + 10]) {
+      const s = shell(Array(8).fill(height), chapter);
+      const target = s.flow.children.find(e => Number(e.attrs['data-ch']) === chapter);
+      s.scroll(target.offsetTop + offset);
+      const before = s.state();
+      const active = s.flow.children.find(e => Number(e.attrs['data-ch']) === before[0]);
+      const actualOffset = s.window.scrollY - active.offsetTop;
+      if (chapter !== 7) assert(Math.abs(actualOffset - offset) < .001, 'requested nonfinal offset must be reached');
+      // The final runway intentionally stops at the last chapter's usable bottom;
+      // final cases round-trip that actual boundary rather than fictitious scroll.
+      for (const kind of ['reopen', 'bookmark']) {
+        const restored = shell(Array(8).fill(height), before[0], before[1]);
+        const frame = restored.flow.children.find(e => Number(e.attrs['data-ch']) === before[0]);
+        assert.equal(restored.state()[0], before[0], `${kind} short chapter ${height}/${chapter}/${offset}`);
+        assert(Math.abs(restored.window.scrollY - frame.offsetTop - actualOffset) < .001,
+          `${kind} short offset ${height}/${chapter}/${offset}`);
+      }
+    }
+    for (const ratio of [0, .5, 1]) {
+      const legacy = shell(Array(8).fill(height), chapter, ratio);
+      const frame = legacy.flow.children.find(e => Number(e.attrs['data-ch']) === chapter);
+      assert(Math.abs(legacy.window.scrollY - frame.offsetTop - Math.max(0, height - 800) * ratio) < .001,
+        `legacy short ratio ${height}/${chapter}/${ratio}`);
+    }
+  }
+}
 // Font reflow preserves the chapter-relative visible anchor, including a tail
 // whose legacy ratio exceeds one; theme-only changes above preserve exact pixels.
 for (const y of [900, 1500, 1700, 2500]) {
