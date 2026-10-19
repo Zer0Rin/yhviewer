@@ -218,6 +218,25 @@ class V11FlowAcceptanceTest {
         assertEquals("Visible text stays anchored", before.getString("text"), after.getString("text"))
         assertEquals("CSS viewport offset stays anchored", before.getDouble("offset"), after.getDouble("offset"), 3.0)
     }
+    private fun liveLayout(s: ActivityScenario<MainActivity>): JSONObject = JSONObject(string(s, """
+        JSON.stringify((()=>{const f=document.querySelector('[data-ch="5"] iframe'),d=f?.contentDocument;
+          return {css:d?.getElementById('yh-reading')?.textContent||'',fontPx:d?parseFloat(d.defaultView.getComputedStyle(d.body).fontSize):0,
+            height:f?.offsetHeight||0,bodyHeight:d?.body?.scrollHeight||0,state:YH.state()};})())
+    """.trimIndent()))
+    private fun waitForLiveLayout(s: ActivityScenario<MainActivity>, cssToken: String): JSONObject {
+        var previous = ""
+        var settled: JSONObject? = null
+        compose.waitUntil(15_000) {
+            val sample = liveLayout(s)
+            val current = sample.toString()
+            val ready = sample.getString("css").contains(cssToken) && sample.getDouble("height") >= sample.getDouble("bodyHeight") && sample.getString("state").isNotBlank()
+            val stable = ready && current == previous
+            previous = current
+            if (stable) settled = sample
+            stable
+        }
+        return checkNotNull(settled)
+    }
     @Test fun prependAndHeightGrowthAboveViewportKeepVisibleParagraph() {
         val id = runBlocking { fixtures.import(fixtures.txt()) }
         runBlocking { repo.savePosition(id, Locator(6, .4f), 12) }
@@ -260,6 +279,7 @@ class V11FlowAcceptanceTest {
             open(s, id)
             val original = view(s)
             val before = anchor(s)
+            val beforeState = state(s)
             compose.onNodeWithText("Aa").performClick()
             // Vertical scroll uses a non-horizontal sibling, then the horizontal chip row.
             compose.onNodeWithText("主题").performScrollTo()
@@ -273,17 +293,28 @@ class V11FlowAcceptanceTest {
             compose.onNodeWithText("无衬线").performScrollTo().assertIsDisplayed().performClick()
             Espresso.pressBack()
             ready(s)
+            waitForLiveLayout(s, "--read-font:var(--font-sans)")
             assertSame(original, view(s))
             assertEquals(5, chapter(s))
             assertEquals("terminal", string(s, "document.documentElement.dataset.theme"))
             assertEquals(before.getString("text"), anchor(s).getString("text"))
+            assertEquals("Theme/font change preserves chapter", beforeState.first, state(s).first)
+            assertEquals("Theme/font change preserves ratio", beforeState.second, state(s).second, .04f)
             model(s) { assertEquals(ReadingFont.SANS, it.reading.font) }
+            val beforeScale = state(s)
+            val beforeScaleAnchor = anchor(s)
+            val beforeFontPx = liveLayout(s).getDouble("fontPx")
             compose.onNodeWithText("Aa").performClick()
             compose.onNodeWithContentDescription("字号").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(120f) }
             Espresso.pressBack()
             ready(s)
+            val scaled = waitForLiveLayout(s, "--read-scale:1.20")
             assertSame(original, view(s))
             assertEquals(5, chapter(s))
+            assertTrue("Font-size control changes rendered CSS font size", scaled.getDouble("fontPx") > beforeFontPx)
+            assertEquals("Font-size change preserves visible paragraph", beforeScaleAnchor.getString("text"), anchor(s).getString("text"))
+            assertEquals("Font-size change preserves chapter", beforeScale.first, state(s).first)
+            assertEquals("Font-size change preserves ratio", beforeScale.second, state(s).second, .04f)
             model(s) { assertEquals(120, it.reading.fontScale) }
             compose.onNodeWithText("Aa").performClick()
             compose.onNodeWithText("章节连续滚动").performScrollTo().assertIsDisplayed()
