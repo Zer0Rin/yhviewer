@@ -16,6 +16,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,6 +48,7 @@ fun ReaderSettingsSheet(
     chapterCount: Int,
     onChapter: (Int) -> Unit,
     onDismiss: () -> Unit,
+    onBookmark: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -61,6 +63,9 @@ fun ReaderSettingsSheet(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            onBookmark?.let { add ->
+                TextButton(onClick = add, modifier = Modifier.fillMaxWidth()) { Text("添加当前位置书签") }
+            }
             if (chapterCount > 1) {
                 var draft by remember(chapter) { mutableFloatStateOf(chapter.toFloat()) }
                 Label("进度", "第 ${draft.roundToInt() + 1} / $chapterCount 章")

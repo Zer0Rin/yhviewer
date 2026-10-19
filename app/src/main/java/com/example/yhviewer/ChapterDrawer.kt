@@ -81,9 +81,14 @@ fun ChapterDrawerContent(
     onPick: (Int) -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    // v10：抽屉里的第二页"书签"
+    bookmarks: List<Bookmark> = emptyList(),
+    onBookmark: (Bookmark) -> Unit = {},
+    onDeleteBookmark: (Bookmark) -> Unit = {},
 ) {
     val yh = LocalYH.current
     var query by rememberSaveable { mutableStateOf("") }
+    var tab by rememberSaveable { mutableStateOf(0) } // 0 目录，1 书签
     val entries = remember(titles, query) { filterToc(titles, query) }
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
@@ -127,7 +132,21 @@ fun ChapterDrawerContent(
                 .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("目录 · ${titles.size} 章", style = MaterialTheme.typography.labelSmall, color = yh.subtle)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                listOf("目录 · ${titles.size} 章", "书签 · ${bookmarks.size}").forEachIndexed { i, label ->
+                    Text(
+                        label,
+                        modifier = Modifier
+                            .clickable { tab = i }
+                            .drawBehind {
+                                if (tab == i) drawRect(yh.accent, topLeft = Offset(0f, size.height + 3.dp.toPx()),
+                                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 2.dp.toPx()))
+                            },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (tab == i) yh.fg else yh.subtle,
+                    )
+                }
+            }
             Text(bookTitle, style = MaterialTheme.typography.titleLarge, color = yh.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
             ProgressLine(fraction = (current + 1f) / titles.size.coerceAtLeast(1))
             Text(
@@ -138,7 +157,9 @@ fun ChapterDrawerContent(
         }
         HorizontalDivider(color = yh.line)
 
-        if (titles.size > TOC_FILTER_THRESHOLD) {
+        if (tab == 1) {
+            BookmarkList(bookmarks, current, onPick = onBookmark, onDelete = onDeleteBookmark, modifier = Modifier.weight(1f))
+        } else if (titles.size > TOC_FILTER_THRESHOLD) {
             UnderlineField(
                 value = query,
                 onValueChange = { query = it },
@@ -148,7 +169,7 @@ fun ChapterDrawerContent(
         }
 
         // ---------- 章节列表 ----------
-        Box(Modifier.weight(1f)) {
+        if (tab == 0) Box(Modifier.weight(1f)) {
             if (entries.isEmpty()) {
                 Text(
                     "没有匹配的章节",

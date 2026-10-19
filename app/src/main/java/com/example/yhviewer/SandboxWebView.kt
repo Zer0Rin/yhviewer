@@ -83,6 +83,22 @@ sealed interface PageSource {
 
     /** EPUB 解压目录里的一个章节文件，挂在 /book/<path> */
     data class BookFile(val rootDir: File, val path: String, val fragment: String? = null) : PageSource
+
+    /**
+     * v10：文件夹导入的文档，挂在 /bundle/<相对路径>。mainHtml 是要显示的页面（HTML 原文或渲染好的 Markdown），
+     * 同一目录树里的 CSS、图片、字体按相对路径从 rootDir 读取。
+     */
+    data class BundleFile(val rootDir: File, val relPath: String, val mainHtml: String) : PageSource
+}
+
+internal fun PageSource.supportsTemplateUpdates(): Boolean = this is PageSource.Html || this is PageSource.BundleFile
+
+/** v10：页面里的 alert / confirm / prompt，改用我们自己的对话框显示（标题写明来自哪个文档，避免伪装成系统提示） */
+sealed interface JsDialogRequest {
+    val message: String
+    data class Alert(override val message: String, val result: android.webkit.JsResult) : JsDialogRequest
+    data class Confirm(override val message: String, val result: android.webkit.JsResult) : JsDialogRequest
+    data class Prompt(override val message: String, val default: String, val result: android.webkit.JsPromptResult) : JsDialogRequest
 }
 
 private fun noStoreResponse(mime: String?, encoding: String?, csp: String, body: java.io.InputStream?) =
@@ -98,6 +114,34 @@ private class DocumentPathHandler(private val html: String, private val csp: Str
         return noStoreResponse("text/html", "utf-8", csp, ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)))
     }
 }
+
+/**
+ * v10：从文件夹副本提供文件。路径穿越防护同样交给 InternalStoragePathHandler；
+ * 所有响应都带上这份文档权限对应的 CSP。文件夹里的 HTML 在导入时已统一转成 UTF-8。
+ */
+private class BundlePathHandler(
+    context: Context,
+    rootDir: File,
+    private val mainPath: String,
+    private val mainHtml: String,
+    private val csp: String,
+) : WebViewAssetLoader.PathHandler {
+    private val files = WebViewAssetLoader.InternalStoragePathHandler(context, rootDir)
+
+    override fun handle(path: String): WebResourceResponse? {
+        if (path == mainPath) {
+            return noStoreResponse("text/html", "utf-8", csp, ByteArrayInputStream(mainHtml.toByteArray(Charsets.UTF_8)))
+        }
+        val res = files.handle(path)?.takeIf { it.data != null } ?: return null
+        val lower = path.lowercase()
+        val isHtml = lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".xhtml")
+        return noStoreResponse(res.mimeType, if (isHtml) "utf-8" else res.encoding, csp, res.data)
+    }
+}
+
+/** 文件夹副本里的相对路径逐段编码成 URL */
+internal fun bundleUrl(host: String, relPath: String): String =
+    "https://$host/bundle/" + relPath.split('/').joinToString("/") { Uri.encode(it) }
 
 /**
  * 从 EPUB 解压目录提供文件。
@@ -132,6 +176,9 @@ private class SandboxClient(
     private val onPageLoaded: (WebView) -> Unit,
     private val onInternalLink: (Uri) -> Boolean,
     private val onRendererGone: (WebView) -> Unit,
+    /** v10：页面引用了本地路径下不存在的文件（单文件导入的 HTML 引用同文件夹资源时就是这样） */
+    private val onMissingLocal: (String) -> Unit = {},
+    private val onPageLoading: () -> Unit = {},
 ) : WebViewClient() {
 
     // 跑在后台线程，不能直接改 Compose 状态
@@ -139,6 +186,8 @@ private class SandboxClient(
         val url = request.url
         if (Sandbox.isLocal(url, localHost)) {
             loader.shouldInterceptRequest(url)?.let { return it }
+            val path = url.path.orEmpty()
+            if ((path.startsWith("/doc/") && path != "/doc/index.html") || path.startsWith("/bundle/")) onMissingLocal(path)
         } else if (url.host != Sandbox.HOST && url.host?.endsWith(".${Sandbox.HOST}") != true &&
             RequestPolicy.allowsNetwork(permissions, url.scheme, url.host)) {
             return null
@@ -169,6 +218,11 @@ private class SandboxClient(
         // Every affected WebView handles its own callback; renderers may be shared.
         onRendererGone(view)
         return true
+    }
+
+    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+        super.onPageStarted(view, url, favicon)
+        onPageLoading()
     }
 
     override fun onPageFinished(view: WebView, url: String?) {
@@ -260,6 +314,13 @@ fun HtmlView(
     storageProfileId: Long? = null,
     onRendererGone: () -> Unit = {},
     handle: WebViewHandle? = null,
+    /** v10：每次页面加载完成（用于搜索结果跳转后的高亮） */
+    onPageReady: () -> Unit = {},
+    onPageLoading: () -> Unit = {},
+    /** v10：缺失的本地资源路径（去重后的列表，后台线程收集、主线程回调） */
+    onMissingLocal: (List<String>) -> Unit = {},
+    /** v10：页面弹窗对话框的标题，写明来源文档 */
+    dialogSource: String = "页面",
 ) {
     val effective = if (source is PageSource.BookFile) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
@@ -275,6 +336,13 @@ fun HtmlView(
     val latestBookReading by rememberUpdatedState(bookReadingCss)
     val latestGestures by rememberUpdatedState(gestures)
     val latestOnRendererGone by rememberUpdatedState(onRendererGone)
+    val latestOnPageReady by rememberUpdatedState(onPageReady)
+    val latestOnPageLoading by rememberUpdatedState(onPageLoading)
+    val latestOnMissing by rememberUpdatedState(onMissingLocal)
+    var jsDialog by remember { mutableStateOf<JsDialogRequest?>(null) }
+    var dialogsShown by remember { mutableIntStateOf(0) }
+    var dialogsBlocked by remember { mutableStateOf(false) }
+    val missing = remember { MissingResourceAccumulator() }
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
 
@@ -287,7 +355,7 @@ fun HtmlView(
         val target = if (position.initialized) view.scrollRatio() else position.ratio
         val epoch = ++position.epoch
         position.reporting = false
-        if (source is PageSource.Html) {
+        if (source.supportsTemplateUpdates()) {
             val updates = buildList {
                 theme?.let { add("window.setTheme && window.setTheme(${MarkdownRenderer.toJsonString(it.id)})") }
                 wrap?.let { add("window.setWrap && window.setWrap($it)") }
@@ -347,17 +415,52 @@ fun HtmlView(
                         builder.addPathHandler("/book/", EpubPathHandler(context, source.rootDir, { latestBookTheme() }, { latestBookReading() }))
                         Sandbox.bookUrl(source.path).replace(Sandbox.HOST, localHost) + (source.fragment?.let { "#" + Uri.encode(it) } ?: "")
                     }
+                    is PageSource.BundleFile -> {
+                        builder.addPathHandler(
+                            "/bundle/",
+                            BundlePathHandler(context, source.rootDir, source.relPath, source.mainHtml, CspPolicy.build(effective)),
+                        )
+                        bundleUrl(localHost, source.relPath)
+                    }
                 }
                 val loader = builder.build()
                 view.apply {
-                    applySandboxSettings(allowJs = source is PageSource.Html && effective.scripts)
+                    applySandboxSettings(allowJs = source !is PageSource.BookFile && effective.scripts)
+                    // v10：页面弹窗。不设置 WebChromeClient 时 alert() 会被静默丢弃，用户以为按钮坏了
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        private fun show(req: JsDialogRequest): Boolean {
+                            if (dialogsBlocked || jsDialog != null) {
+                                when (req) {
+                                    is JsDialogRequest.Alert -> req.result.confirm()
+                                    is JsDialogRequest.Confirm -> req.result.cancel()
+                                    is JsDialogRequest.Prompt -> req.result.cancel()
+                                }
+                            } else jsDialog = req
+                            return true
+                        }
+                        // 参数按可空声明：不同 API 级别的 SDK 对这些参数的可空注解不一致
+                        override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean =
+                            result?.let { show(JsDialogRequest.Alert(message.orEmpty().take(2_000), it)) } ?: false
+                        override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean =
+                            result?.let { show(JsDialogRequest.Confirm(message.orEmpty().take(2_000), it)) } ?: false
+                        override fun onJsPrompt(view: WebView?, url: String?, message: String?, defaultValue: String?, result: android.webkit.JsPromptResult?): Boolean =
+                            result?.let { show(JsDialogRequest.Prompt(message.orEmpty().take(2_000), defaultValue.orEmpty().take(2_000), it)) } ?: false
+                        // 离开页面时不让页面拦截
+                        override fun onJsBeforeUnload(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean {
+                            result?.confirm(); return true
+                        }
+                    }
                     webViewClient = SandboxClient(
                         loader = loader,
                         permissions = effective,
                         localHost = localHost,
                         onHistoryChanged = { canGoBack = it },
                         onExternalLink = { uri -> openExternal(context, uri) },
-                        onPageLoaded = { pageLoads++ },
+                        onPageLoaded = { pageLoads++; latestOnPageReady() },
+                        onPageLoading = { latestOnPageLoading() },
+                        onMissingLocal = { path ->
+                            if (missing.add(path)) post { latestOnMissing(missing.drainNotification()) }
+                        },
                         onRendererGone = { dead ->
                             if (sessions.containsKey(dead)) {
                                 canGoBack = false
@@ -396,6 +499,19 @@ fun HtmlView(
         },
         onRelease = ::releaseView,
     )
+
+    jsDialog?.let { req ->
+        JsDialog(
+            source = dialogSource,
+            request = req,
+            offerBlock = dialogsShown >= 2,
+            onDone = { block ->
+                dialogsShown++
+                if (block) dialogsBlocked = true
+                jsDialog = null
+            },
+        )
+    }
 }
 
 class ReaderGestures(

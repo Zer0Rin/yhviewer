@@ -35,9 +35,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
-        if (savedInstanceState == null) {
-            extractUri(intent)?.let(vm::importAndOpen)
-        }
+        if (savedInstanceState == null) handleIntent(intent)
         setContent {
             YHTheme(vm.theme) { AppRoot(vm) }  // 外壳颜色跟随阅读主题
         }
@@ -45,13 +43,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        extractUri(intent)?.let(vm::importAndOpen)
+        handleIntent(intent)
     }
 
     // 进入后台时立刻保存阅读位置：之后进程可能随时被系统回收
     override fun onStop() {
         super.onStop()
         vm.flushPosition()
+    }
+
+    /** v10：分享多个文件（ACTION_SEND_MULTIPLE）走批量导入 */
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND_MULTIPLE) {
+            IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                ?.filterNotNull()?.let(vm::importMany)
+            return
+        }
+        extractUri(intent)?.let(vm::importAndOpen)
     }
 
     private fun extractUri(intent: Intent?): Uri? = when (intent?.action) {
@@ -63,11 +71,20 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppRoot(vm: ShelfViewModel) {
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(vm::importAndOpen)
+    // v10：可以一次选多个文件；只选一个时和以前一样直接打开
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        vm.importMany(uris)
+    }
+    // v10：导入整个文件夹（只读一次，不申请持久授权）
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        tree?.let(vm::importFolder)
     }
     when (vm.screen) {
-        Screen.Shelf -> ShelfScreen(vm, onOpenFile = { picker.launch(arrayOf("*/*")) })
+        Screen.Shelf -> ShelfScreen(
+            vm,
+            onOpenFile = { picker.launch(arrayOf("*/*")) },
+            onOpenFolder = { folderPicker.launch(null) },
+        )
         Screen.Reader -> ReaderScreen(vm)
     }
 }

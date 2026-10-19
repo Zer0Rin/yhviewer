@@ -54,7 +54,11 @@
     [data-theme="terminal"] blockquote::before { content: ">"; position: absolute; left: 0; color: var(--marker); }
     [data-theme="terminal"] th { background: none; }
     [data-theme="terminal"] hr { border-top-style: dashed; }
-  </style>
+      /* v10：脚注 */
+    .footnotes-sep { border: 0; border-top: 1px solid var(--border); margin: 2em 0 1em; }
+    .footnotes { font-size: .88em; color: var(--muted); }
+    .footnote-ref a, .footnote-backref { text-decoration: none; }
+</style>
 </head>
 <body>
   <main id="content"></main>
@@ -64,6 +68,8 @@
 
   <script src="/assets/md/markdown-it.min.js"></script>
   <script src="/assets/md/highlight.min.js"></script>
+  <!-- v10：脚注语法（[^1]）。文件缺失时跳过，不影响其他渲染 -->
+  <script src="/assets/md/markdown-it-footnote.min.js"></script>
   <script>
     // 供 Kotlin 通过 evaluateJavascript 实时切换主题（白名单，不接受任意字符串）
     window.setTheme = function (t) {
@@ -102,6 +108,7 @@
         },
       });
 
+      if (window.markdownitFootnote) md.use(window.markdownitFootnote);
       out.innerHTML = md.render(src);
 
       const h = out.querySelector('h1, h2');

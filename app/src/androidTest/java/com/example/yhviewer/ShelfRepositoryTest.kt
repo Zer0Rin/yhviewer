@@ -61,6 +61,20 @@ class ShelfRepositoryTest {
 
     private suspend fun openSingle(id: Long) = repo.open(id) as OpenedDoc.Single
 
+    @Test fun concurrentBookmarkAddsUsePersistedStateBeforeObserverDelivery() = runBlocking<Unit> {
+        val (_, uri) = source("bookmark.md", "# book")
+        val id = repo.import(uri)
+        val first = Bookmark(bookId = id, chapter = 0, ratio = 0.25f, label = "first", createdAt = 0)
+        // Start both writes without collecting the Flow: UI observer delivery cannot deduplicate these.
+        val a = async(start = CoroutineStart.UNDISPATCHED) { repo.addBookmark(first) }
+        val b = async(start = CoroutineStart.UNDISPATCHED) { repo.addBookmark(first.copy(ratio = 0.255f)) }
+        assertEquals(listOf(false, true), listOf(a.await(), b.await()).sorted())
+        assertEquals(1, repo.observeBookmarks(id).first().size)
+        repo.addBookmark(first.copy(ratio = 0.5f))
+        repo.addBookmark(first.copy(chapter = 1))
+        assertEquals(3, repo.observeBookmarks(id).first().size)
+    }
+
     // ---------- 单页文档（沿用第 5 步的行为） ----------
 
     @Test fun importThenOpenRoundTrip() = runBlocking<Unit> {

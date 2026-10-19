@@ -9,7 +9,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-**v0.6.0** adds a vector eye-and-V launcher icon with Android themed-icon support. It unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
+**v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -21,7 +21,11 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|---|---|---|
 | ![](docs/screenshots/shelf-ink.png) | ![](docs/screenshots/v4-selection.png) | ![](docs/screenshots/toc.png) | ![](docs/screenshots/v4-terminal-reader.png) | ![](docs/screenshots/markdown-paper.png) |
 
-**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
+| Folder import report | Whole-book search |
+|---|---|
+| ![](docs/screenshots/v07-import-report.png) | ![](docs/screenshots/v07-book-search.png) |
+
+**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.7 verification](docs/verification/V07_VERIFICATION.md), [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 
@@ -48,6 +52,12 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 | **EPUB** | EPUB 2 and 3, title and TOC from nav / NCX, images and publisher CSS, book scripts never run |
 
 Reading and library features:
+
+- **Multiple-file and folder import**: select several files or share them together. Folder import keeps HTML/Markdown with relative images, styles and other resources, reports unsupported/failed entries, and preserves existing metadata on reimport. A single HTML missing sibling resources explains how to import its folder.
+- **Search**: native in-page find with previous/next matches; TXT and EPUB also search across chapters and jump to a specific match (up to 500 results). SVG text can be searched in its source view.
+- **Bookmarks**: save and revisit chapter/scroll positions, remove bookmarks, and retain them across reading sessions. Nearby positions in the same chapter are deduplicated; deleting a document removes its bookmarks.
+- **Additional formats**: Markdown footnotes, SVG image/source switching, and LOG classification as plain text. Detected vertical EPUBs are normalized to horizontal reading with an explanatory notice.
+- **HTML dialogs**: alert/confirm/prompt use document-attributed native dialogs; repeated prompts may be blocked for the current page.
 
 - **Reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Markdown, code and TXT switch in place; EPUB reloads with scripts disabled. Position is preserved approximately and code colors follow the theme. HTML retains its original appearance and has no theme menu.
 - **Book reading controls**: TXT and EPUB support immersive reading, confirmed left/right taps to move 90% of the viewport, chapter navigation, font size, line height, margins, font selection and keep-awake. Settings persist; EPUB scripts remain disabled.

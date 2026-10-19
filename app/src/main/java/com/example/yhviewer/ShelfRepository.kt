@@ -6,6 +6,8 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +29,8 @@ sealed interface OpenedDoc {
         override val locator: Locator,
         val doc: LoadedDoc,
         val permissions: DocPermissions = DocPermissions.STANDARD,
+        /** v10：文件夹导入的 HTML / Markdown，和同文件夹资源放在一起；单文件导入时为 null */
+        val bundle: BundleRef? = null,
     ) : OpenedDoc {
         override val chapterCount get() = 1
     }
@@ -46,10 +50,15 @@ sealed interface OpenedDoc {
         override val locator: Locator,
         val rootDir: File,
         val chapters: List<EpubChapter>,
+        /** v10：原书竖排，阅读时已转为横排 */
+        val vertical: Boolean = false,
     ) : OpenedDoc {
         override val chapterCount get() = chapters.size
     }
 }
+
+/** 文件夹副本里的一份文档：rootDir 是副本根目录，relPath 是文档在其中的相对路径 */
+data class BundleRef(val rootDir: File, val relPath: String)
 
 /**
  * 书架的唯一入口：所有文档先"导入"成本地副本，再从副本打开。
@@ -70,6 +79,7 @@ class ShelfRepository(
 ) {
     private val dao = db.bookDao()
     private val groupDao = db.groupDao()
+    private val bookmarkDao = db.bookmarkDao()
 
     fun observe(query: String, favoritesOnly: Boolean): Flow<List<Book>> =
         dao.observe(escapeLike(query.trim()), favoritesOnly)
@@ -77,6 +87,136 @@ class ShelfRepository(
     suspend fun import(uri: Uri): Long = storageLock.withLock {
         val source = DocumentLoader.probe(context, uri)
         if (source.type == DocType.EPUB) importEpub(uri, source) else importText(uri, source)
+    }
+
+    // ---------------- v10：多选导入、文件夹导入 ----------------
+
+    /** 逐个导入，单个失败不影响其他文件；返回报告。importedIds 按成功顺序 */
+    suspend fun importMany(uris: List<Uri>, onProgress: (ImportProgress) -> Unit = {}): Pair<ImportReport, List<Long>> {
+        val ids = ArrayList<Long>()
+        val failed = ArrayList<Pair<String, String>>()
+        uris.forEachIndexed { i, uri ->
+            val name = runCatching { DocumentLoader.probe(context, uri).name }.getOrDefault(uri.lastPathSegment ?: "文件")
+            onProgress(ImportProgress(i, uris.size, name))
+            try {
+                ids += import(uri)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed += name to (e.message ?: e.javaClass.simpleName)
+            }
+        }
+        onProgress(ImportProgress(uris.size, uris.size, ""))
+        return ImportReport(imported = ids.size, failed = failed, skipped = emptyList()) to ids
+    }
+
+    /**
+     * 导入整个文件夹（见 FolderImport.kt 的分类规则）：
+     *  1. HTML / Markdown 和资源复制进一个新的文件夹副本 shelf/<uuid>/，保持相对路径
+     *  2. 每份 HTML / Markdown 提交成一条记录，localFile = "<uuid>/<相对路径>"，来源键 = 文件夹 Uri#相对路径
+     *     （再次导入同一个文件夹时更新原记录，阅读位置、分组、收藏都保留）
+     *  3. 其他文档（TXT、EPUB、代码…）逐个按单文件导入
+     *  4. 旧的文件夹副本不再被任何记录引用时删除
+     */
+    suspend fun importFolder(treeUri: Uri, onProgress: (ImportProgress) -> Unit = {}): ImportReport {
+        val found = FolderWalker.walk(context, treeUri)
+        val plan = FolderImportPlanner.plan(found.map { it.entry })
+        val uriOf = found.filter { it.entry.skipReason == null }.associate { it.entry.relPath to it.uri }
+        val failed = ArrayList<Pair<String, String>>()
+        val skipped = plan.skipped.map { it.entry.relPath to (it.reason ?: "跳过") }
+        val total = plan.bundleDocs.size + plan.standalone.size
+        var done = 0
+        var imported = 0
+        var copiedResources = 0
+
+        if (plan.bundleDocs.isNotEmpty()) {
+            storageLock.withLock {
+                val bundle = UUID.randomUUID().toString()
+                val staging = File(dir, "$bundle.tmp")
+                val root = File(dir, bundle)
+                val budget = BundleCopyBudget(FolderImportPlanner.Limits().maxBundleBytes)
+                val docs = ArrayList<StagedBundleDocument>()
+                try {
+                    withContext(Dispatchers.IO) {
+                        for (p in plan.bundleFiles) {
+                            currentCoroutineContext().ensureActive()
+                            val rel = p.entry.relPath
+                            val target = File(staging, rel)
+                            if (!target.canonicalPath.startsWith(staging.canonicalPath + File.separator)) {
+                                throw IOException("非法路径：$rel")
+                            }
+                            val uri = uriOf.getValue(rel)
+                            try {
+                                if (p.role == EntryRole.BUNDLE_DOC) {
+                                    val name = rel.substringAfterLast('/')
+                                    // 文档统一转成 UTF-8 存储，提供给 WebView 时声明 utf-8（HTTP 头优先于页面里的 meta charset）
+                                    val text = DocumentLoader.readText(context, uri, DocumentLoader.MAX_TEXT_BYTES)
+                                    val bytes = text.toByteArray(Charsets.UTF_8)
+                                    target.parentFile?.mkdirs()
+                                    budget.add(bytes.size.toLong())
+                                    target.writeBytes(bytes)
+                                    docs += StagedBundleDocument.from(rel, bytes.size.toLong(), text)
+                                } else {
+                                    val size = DocumentLoader.copyTo(context, uri, target, minOf(FolderImportPlanner.Limits().maxFileBytes, budget.remaining))
+                                    budget.add(size)
+                                    copiedResources++
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                target.delete()
+                                failed += rel to (e.message ?: e.javaClass.simpleName)
+                            }
+                        }
+                        if (docs.isNotEmpty() && !staging.renameTo(root)) throw IOException("保存文件夹副本失败")
+                    }
+                } catch (e: Exception) {
+                    withContext(NonCancellable + Dispatchers.IO) { staging.deleteRecursively() }
+                    throw e
+                } finally {
+                    withContext(NonCancellable + Dispatchers.IO) { staging.deleteRecursively() }
+                }
+
+                val previousTops = HashSet<String>()
+                for (doc in docs) {
+                    val rel = doc.relPath
+                    val size = doc.size
+                    onProgress(ImportProgress(done, total, rel))
+                    val key = BundlePaths.sourceKey(treeUri.toString(), rel)
+                    dao.findBySource(key)?.let { previousTops += BundlePaths.topLevel(it.localFile) }
+                    try {
+                        commit(key, doc.name, doc.type, BundlePaths.localFile(bundle, rel), size, doc.kind, null)
+                        imported++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed += rel to (e.message ?: e.javaClass.simpleName)
+                    }
+                    done++
+                }
+                if (imported == 0) copiedResources = 0
+                // 新副本一个记录都没提交成功、或旧副本已经没有记录引用：删掉
+                withContext(NonCancellable + Dispatchers.IO) {
+                    val referenced = dao.allLocalFiles().mapTo(HashSet()) { BundlePaths.topLevel(it) }
+                    (previousTops + bundle).filter { it !in referenced }.forEach { File(dir, it).deleteRecursively() }
+                }
+            }
+        }
+
+        for (p in plan.standalone) {
+            onProgress(ImportProgress(done, total, p.entry.relPath))
+            try {
+                import(uriOf.getValue(p.entry.relPath))
+                imported++
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed += p.entry.relPath to (e.message ?: e.javaClass.simpleName)
+            }
+            done++
+        }
+        onProgress(ImportProgress(total, total, ""))
+        return ImportReport(imported, failed, skipped, resources = copiedResources.takeIf { imported > 0 } ?: 0)
     }
 
     private suspend fun importText(uri: Uri, source: DocumentLoader.Source): Long {
@@ -156,7 +296,7 @@ class ShelfRepository(
             throw e
         }
         oldFile?.takeIf { it != fileName }?.let { old ->
-            withContext(NonCancellable + Dispatchers.IO) { File(dir, old).deleteRecursively() }
+            withContext(NonCancellable + Dispatchers.IO) { BundleStorage.removeUnreferenced(dir, old, dao.allLocalFiles()) }
         }
         return id
     }
@@ -273,10 +413,15 @@ class ShelfRepository(
             val local = File(dir, book.localFile)
             if (!local.exists()) throw IOException("本地副本丢失，请从原文件重新打开")
             when (book.type) {
-                DocType.EPUB -> OpenedDoc.Epub(book.id, book.name, locator, local, EpubParser.parse(local).chapters)
+                DocType.EPUB -> EpubParser.parse(local).let { parsed ->
+                    OpenedDoc.Epub(book.id, book.name, locator, local, parsed.chapters, parsed.vertical)
+                }
                 DocType.TXT -> OpenedDoc.Txt(book.id, book.name, locator, TxtChapters.split(local.readText(Charsets.UTF_8)))
                 else -> OpenedDoc.Single(
-                    book.id, book.name, locator, LoadedDoc(book.name, book.type, local.readText(Charsets.UTF_8)), DocPermissions.fromBits(book.permissions)
+                    book.id, book.name, locator, LoadedDoc(book.name, book.type, local.readText(Charsets.UTF_8)), DocPermissions.fromBits(book.permissions),
+                    bundle = book.localFile.takeIf(BundlePaths::isBundle)?.let {
+                        BundleRef(File(dir, BundlePaths.topLevel(it)), BundlePaths.relPath(it))
+                    },
                 )
             }
         }
@@ -304,11 +449,21 @@ class ShelfRepository(
             // Verify that opening succeeds too; a provider/filesystem can deny access after canRead.
             existing.inputStream().use { it.read() }
         }
+        val kind = ContentClassifier.classify(book.name, book.type, bytes.size.toLong(), text).id
+        if (BundlePaths.isBundle(book.localFile)) {
+            // 文件夹副本里的文档原地替换：换成新文件名会离开副本目录，相对路径的资源就找不到了
+            withContext(Dispatchers.IO) {
+                val target = File(dir, book.localFile)
+                BundleStorage.replace(target, bytes)
+            }
+            if (dao.updateContent(id, book.localFile, bytes.size.toLong(), kind) != 1) throw IOException("书架里没有这个文档")
+            return@withLock
+        }
         val fileName = UUID.randomUUID().toString()
         try {
             withContext(Dispatchers.IO) { writeAtomically(File(dir, fileName), bytes) }
             db.withTransaction {
-                if (dao.updateContent(id, fileName, bytes.size.toLong(), ContentClassifier.classify(book.name, book.type, bytes.size.toLong(), text).id) != 1) {
+                if (dao.updateContent(id, fileName, bytes.size.toLong(), kind) != 1) {
                     throw IOException("书架里没有这个文档")
                 }
             }
@@ -331,11 +486,50 @@ class ShelfRepository(
     /** 先删记录再删文件：最坏情况留下孤儿文件（启动时会被 cleanOrphans 清掉），而不是一条打不开的记录 */
     suspend fun delete(id: Long) = storageLock.withLock {
         val book = dao.get(id) ?: return@withLock
-        dao.delete(id)
+        db.withTransaction {
+            dao.delete(id)
+            bookmarkDao.deleteForBook(id)
+        }
         withContext(NonCancellable + Dispatchers.IO) {
-            File(dir, book.localFile).deleteRecursively()
+            BundleStorage.removeUnreferenced(dir, book.localFile, dao.allLocalFiles())
             covers.delete(id)
         }
+    }
+
+    // ---------------- v10：书签 ----------------
+
+    fun observeBookmarks(bookId: Long): Flow<List<Bookmark>> = bookmarkDao.observe(bookId)
+
+    /** Serialize against current persisted rows, including rapid adds before Flow delivery. */
+    suspend fun addBookmark(b: Bookmark): Boolean = storageLock.withLock {
+        db.withTransaction {
+            if (dao.get(b.bookId) == null) throw IOException("书架里没有这个文档")
+            val current = bookmarkDao.forBook(b.bookId)
+            if (BookmarkRules.isDuplicate(current, b.chapter, b.ratio)) false
+            else {
+                bookmarkDao.insert(b.copy(createdAt = clock()))
+                true
+            }
+        }
+    }
+
+    suspend fun deleteBookmark(id: Long) = bookmarkDao.delete(id)
+
+    // ---------------- v10：全书搜索用的纯文本 ----------------
+
+    /** 每章纯文本：TXT 直接取章节文本；EPUB 读章节 XHTML 去标签。单章读失败当作空章 */
+    suspend fun chapterTexts(doc: OpenedDoc): List<String> = when (doc) {
+        is OpenedDoc.Txt -> doc.chapters.map { TxtSearchText.rendered(it.title, it.text) }
+        is OpenedDoc.Epub -> withContext(Dispatchers.IO) {
+            doc.chapters.map { ch ->
+                currentCoroutineContext().ensureActive()
+                runCatching {
+                    val f = File(doc.rootDir, ch.path)
+                    if (f.length() > 10L * 1024 * 1024) "" else XhtmlText.extract(CharsetDetector.decode(f.readBytes()).text)
+                }.getOrDefault("")
+            }
+        }
+        is OpenedDoc.Single -> listOf(doc.doc.text)
     }
 
     /**
@@ -343,8 +537,10 @@ class ShelfRepository(
      * 只在 App 启动、还没有导入任务时调用，避免误删正在写入的文件。返回删除的数量。
      */
     suspend fun cleanOrphans(): Int = storageLock.withLock {
-        val referenced = dao.allLocalFiles().toSet()
+        // 文件夹副本按顶层目录名比较："<uuid>/a/b.html" 引用的是目录 <uuid>
+        val referenced = dao.allLocalFiles().mapTo(HashSet()) { BundlePaths.topLevel(it) }
         val ids = dao.allIds().toSet()
+        runCatching { bookmarkDao.deleteOrphans() }
         withContext(Dispatchers.IO) {
             dir.listFiles().orEmpty()
                 .filter { it.name !in referenced }
@@ -365,6 +561,8 @@ class ShelfRepository(
     // A cancellation can arrive after Room commits. Check references before removing anything:
     // an orphan is recoverable at startup, a committed row pointing to a missing file is not.
     private suspend fun discardUnreferenced(fileName: String) = withContext(NonCancellable + Dispatchers.IO) {
+        // 文件夹副本里的文件由 importFolder 统一清理，这里只处理普通副本
+        if (BundlePaths.isBundle(fileName)) return@withContext
         if (fileName !in dao.allLocalFiles()) File(dir, fileName).deleteRecursively()
     }
 

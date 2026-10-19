@@ -19,6 +19,7 @@ enum class ContentKind(val id: String, val label: String) {
     NOVEL("novel", "小说"),
     EBOOK("ebook", "电子书"),
     TEXT("text", "纯文本"),
+    IMAGE("image", "图片"),   // v10：SVG 矢量图，以图片方式显示
     ;
 
     companion object {
@@ -48,6 +49,10 @@ object ContentClassifier {
         if (type == DocType.EPUB) return ContentKind.EBOOK
         val ext = name.substringAfterLast('.', "").lowercase()
         val head = sample.take(SAMPLE_CHARS)
+
+        // v10：SVG 是图片；日志是纯文本（v7 里 .log 被 CodeLanguages 识别成代码类型，归到了"代码"）
+        if (ext == "svg") return ContentKind.IMAGE
+        if (ext == "log" || ext == "out") return ContentKind.TEXT
 
         // 1. 内容本身是网页：不管扩展名（.txt 里存的整页 HTML 也算）
         if (type == DocType.HTML || hasHtmlPrefix(head)) return ContentKind.WEB
