@@ -510,20 +510,38 @@ private fun FlowContent(
         )
         LaunchedEffect(Unit) {
             var announced = false
+            var lastReported: Pair<Int, Float>? = null
             while (true) {
                 if (announced) {
-                    ticks.receive()
+                    // Native taps inside an iframe need not produce a parent scroll or
+                    // shouldOverrideUrlLoading callback. Keep a bounded idle poll alive.
+                    withTimeoutOrNull(FLOW_LINK_POLL_MS) { ticks.receive() }
                     delay(FLOW_POLL_DEBOUNCE_MS)
                 } else {
                     // 等第一章加载完、恢复好位置
                     withTimeoutOrNull(FLOW_READY_POLL_MS) { ticks.receive() }
                 }
+                if (announced && handle.webView == null) break
+                val link = JsonStrings.decodeStringOrNull(handle.evaluate("window.YH ? YH.takeLink() : ''"))
+                if (!link.isNullOrEmpty() && session == vm.documentSession && jump == vm.jumpTick) {
+                    val uri = Uri.parse(link)
+                    val path = uri.path.orEmpty()
+                    if (path.startsWith("/book/")) {
+                        vm.onFlowLink(path.removePrefix("/book/"), uri.fragment)
+                    }
+                }
+                if (session != vm.documentSession || jump != vm.jumpTick) continue
                 val state = FlowShell.parseState(handle.evaluate("window.YH ? YH.state() : ''")) ?: continue
                 if (!announced) {
                     announced = true
                     latestOnPageReady() // 搜索结果跳转后的高亮在这里重放：此时只有目标章已加载
                 }
-                vm.onFlowPosition(session, state.first, state.second, jump)
+                // Idle link polling must not restart the 800 ms position-save
+                // debounce when the chapter and ratio have not changed.
+                if (state != lastReported) {
+                    lastReported = state
+                    vm.onFlowPosition(session, state.first, state.second, jump)
+                }
             }
         }
         // 查找栏打开时暂停补章，查找结果数不会中途变化
@@ -532,6 +550,7 @@ private fun FlowContent(
 }
 
 private const val FLOW_POLL_DEBOUNCE_MS = 120L
+private const val FLOW_LINK_POLL_MS = 250L
 private const val FLOW_READY_POLL_MS = 150L
 
 /** 隐藏 / 恢复系统状态栏和导航栏；离开阅读页时一定恢复 */

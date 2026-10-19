@@ -157,6 +157,7 @@ private fun ChipRow(content: @Composable () -> Unit) {
 private fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange,
+            modifier = Modifier.semantics { contentDescription = title })
     }
 }

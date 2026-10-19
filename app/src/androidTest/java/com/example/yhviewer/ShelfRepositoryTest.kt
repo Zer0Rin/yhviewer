@@ -11,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -148,6 +149,15 @@ class ShelfRepositoryTest {
 
         val opened = repo.open(id) as OpenedDoc.Txt
         assertEquals(listOf("第一章 夜车", "第二章 抵达"), opened.titles)
+    }
+
+    @Test fun txtStreamingCopyRetainsEncodingAndSurrogatesAcrossWriterChunks() = runBlocking<Unit> {
+        val raw = "x".repeat(8191) + "😀\r\n第一章\r正文\r\n第二章\r\n尾声"
+        val id = repo.import(source("chunk-boundary.txt", raw).second)
+        val row = db.bookDao().get(id)!!
+        assertArrayEquals(raw.toByteArray(Charsets.UTF_8), File(shelfDir, row.localFile).readBytes())
+        val doc = repo.open(id) as OpenedDoc.Txt
+        assertEquals(TxtChapters.split(raw), (0 until doc.book.size).map(doc.book::chapter))
     }
 
     @Test fun positionIsSavedAndRestored() = runBlocking<Unit> {

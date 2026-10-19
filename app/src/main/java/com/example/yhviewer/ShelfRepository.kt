@@ -226,19 +226,30 @@ class ShelfRepository(
     private suspend fun importText(uri: Uri, source: DocumentLoader.Source): Long {
         val max = if (source.type == DocType.TXT) DocumentLoader.MAX_TXT_BYTES else DocumentLoader.MAX_TEXT_BYTES
         // 编码识别只在导入时做一次，副本统一存成 UTF-8，之后打开不用再猜
+        fun phase(name: String) {
+            if (source.type == DocType.TXT && BuildConfig.DEBUG) android.util.Log.i("TxtImport", name)
+        }
+        phase("decode-start")
         val text = DocumentLoader.readText(context, uri, max)
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        val kind = ContentClassifier.classify(source.name, source.type, bytes.size.toLong(), text)
+        phase("decode-done chars=${text.length}")
         val fileName = UUID.randomUUID().toString()
         val target = File(dir, fileName)
         try {
-            withContext(Dispatchers.IO) {
-                writeAtomically(target, bytes)
-                // v11：导入时就切好章节、写索引，之后打开只读索引。失败不影响导入（打开时会重建）
-                if (source.type == DocType.TXT) runCatching { TxtBook.build(target, bytes, txtIndexFile(fileName)) }
-                Unit
+            val size = withContext(Dispatchers.IO) {
+                if (source.type == DocType.TXT) {
+                    phase("copy-start")
+                    writeTextAtomically(target, text)
+                    phase("copy-done bytes=${target.length()}")
+                    phase("index-start")
+                    val indexed = runCatching { TxtBook.build(target, text, txtIndexFile(fileName)) }
+                    phase("index-done success=${indexed.isSuccess}")
+                } else {
+                    writeAtomically(target, text.toByteArray(Charsets.UTF_8))
+                }
+                target.length()
             }
-            val id = commit(uri.toString(), source.name, source.type, fileName, bytes.size.toLong(), kind, BookTitles.parse(source.name).author)
+            val kind = ContentClassifier.classify(source.name, source.type, size, text)
+            val id = commit(uri.toString(), source.name, source.type, fileName, size, kind, BookTitles.parse(source.name).author)
             withContext(NonCancellable + Dispatchers.IO) { runCatching { covers.delete(id) } }
             return id
         } catch (e: Exception) {
@@ -567,6 +578,23 @@ class ShelfRepository(
     }
 
     private fun txtIndexFile(localFile: String) = File(txtIndexDir, "$localFile.idx")
+
+    /** Bound encoder scratch space too: Writer.write(String) may copy the whole argument. */
+    private fun writeTextAtomically(target: File, text: String) {
+        target.parentFile?.mkdirs()
+        val tmp = File(target.path + ".tmp")
+        try {
+            tmp.outputStream().bufferedWriter(Charsets.UTF_8).use { out ->
+                var offset = 0
+                while (offset < text.length) {
+                    val count = minOf(8192, text.length - offset)
+                    out.write(text, offset, count)
+                    offset += count
+                }
+            }
+            if (!tmp.renameTo(target)) throw IOException("无法保存本地副本")
+        } finally { tmp.delete() }
+    }
 
     /** 先写临时文件再 rename：写到一半崩溃也不会留下半截副本 */
     private fun writeAtomically(target: File, bytes: ByteArray) {

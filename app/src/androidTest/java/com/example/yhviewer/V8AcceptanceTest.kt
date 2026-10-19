@@ -61,6 +61,7 @@ import java.util.zip.ZipOutputStream
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class V8AcceptanceTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -79,6 +80,7 @@ class V8AcceptanceTest {
     private val bookTitles = listOf("1-1432", "星河旅人", "night train", "山海来信")
 
     @Before fun syntheticShelf() {
+        legacyChapterMode = LegacyChapterMode(context)
         val readerPrefs = context.getSharedPreferences("reader_prefs", 0)
         val shelfPrefs = context.getSharedPreferences("shelf_prefs", 0)
         oldTheme = readerPrefs.getString("md_theme", null)
@@ -153,14 +155,18 @@ class V8AcceptanceTest {
                 groups.forEach { repo.deleteGroup(it) }
             }
         } finally {
-            uris.forEach { context.contentResolver.delete(it, null, null) }
-            if (preferencesRemembered) {
-                val reader = context.getSharedPreferences("reader_prefs", 0).edit()
-                oldTheme?.let { reader.putString("md_theme", it) } ?: reader.remove("md_theme")
-                assertTrue(reader.commit())
-                val shelf = context.getSharedPreferences("shelf_prefs", 0).edit()
-                oldGrid?.let { shelf.putBoolean("books_grid", it) } ?: shelf.remove("books_grid")
-                assertTrue(shelf.commit())
+            try {
+                uris.forEach { context.contentResolver.delete(it, null, null) }
+                if (preferencesRemembered) {
+                    val reader = context.getSharedPreferences("reader_prefs", 0).edit()
+                    oldTheme?.let { reader.putString("md_theme", it) } ?: reader.remove("md_theme")
+                    assertTrue(reader.commit())
+                    val shelf = context.getSharedPreferences("shelf_prefs", 0).edit()
+                    oldGrid?.let { shelf.putBoolean("books_grid", it) } ?: shelf.remove("books_grid")
+                    assertTrue(shelf.commit())
+                }
+            } finally {
+                if (::legacyChapterMode.isInitialized) legacyChapterMode.restore()
             }
         }
     }

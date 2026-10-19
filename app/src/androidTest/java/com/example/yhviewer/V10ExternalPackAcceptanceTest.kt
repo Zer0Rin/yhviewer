@@ -327,19 +327,30 @@ class V10ExternalPackAcceptanceTest {
                 }
                 compose.waitUntil(25_000) { nativeFind(s, marker) > 0 }
                 if (book.name.startsWith("02_") && book.type == DocType.HTML) {
+                    // Native find may still apply its selected-hit scroll after the
+                    // completion callback. Release that state before positioning H02's link.
+                    s.onActivity { web(s)!!.apply { clearMatches(); setFindListener(null) } }
                     assertEquals("true", eval(s, "document.images.length>0 && [...document.images].every(i=>i.complete&&i.naturalWidth>0)"))
                     assertEquals("\"rgb(230, 246, 239)\"", eval(s, "getComputedStyle(document.querySelector('.external-css-marker')).backgroundColor"))
+                    val targetMetrics = """(()=>{const a=[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文'));if(!a)return {missing:true};const r=a.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y)?.closest('a');return {url:location.href,scrollX,scrollY,innerWidth,innerHeight,devicePixelRatio,visualViewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetLeft:visualViewport.offsetLeft,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rect:[r.x,r.y,r.width,r.height],clientRects:[...a.getClientRects()].map(r=>[r.x,r.y,r.width,r.height]),targetHref:a.href,hitHref:h?.href||null,pointInside:x>=0&&y>=0&&x<innerWidth&&y<innerHeight}})()"""
+                    val beforeScroll = eval(s, targetMetrics)
                     eval(s, "[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文')).scrollIntoView({block:'center'}); true")
-                    val point = org.json.JSONArray(eval(s, "(()=>{const r=[...document.querySelectorAll('a')].find(a=>a.textContent.includes('英文')).getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()"))
-                    s.onActivity {
-                        val view = web(s)!!
-                        @Suppress("DEPRECATION") val scale = view.scale
-                        val now = android.os.SystemClock.uptimeMillis()
-                        for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
-                            val event = android.view.MotionEvent.obtain(now, now + action * 50L, action, point.getDouble(0).toFloat() * scale, point.getDouble(1).toFloat() * scale, 0)
-                            view.dispatchTouchEvent(event); event.recycle()
-                        }
+                    var stableMetrics: org.json.JSONObject? = null
+                    var previous = ""
+                    compose.waitUntil(15_000) {
+                        val sample = eval(s, targetMetrics)!!
+                        val parsed = org.json.JSONObject(sample)
+                        val ready = parsed.getBoolean("pointInside") && parsed.optString("hitHref") == parsed.getString("targetHref")
+                        val stable = ready && sample == previous
+                        previous = sample
+                        if (stable) stableMetrics = parsed
+                        stable
                     }
+                    val afterScroll = checkNotNull(stableMetrics)
+                    val rect = afterScroll.getJSONArray("rect")
+                    val point = org.json.JSONArray().put(rect.getDouble(0) + rect.getDouble(2) / 2).put(rect.getDouble(1) + rect.getDouble(3) / 2)
+                    val touchMetrics = tapRenderedWebViewPoint(instrumentation, checkNotNull(web(s)), point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
+                    android.util.Log.i("V10Pack", "H02 tap before=$beforeScroll after=$afterScroll native=$touchMetrics")
                     var navigationState = ""
                     try {
                         compose.waitUntil(15_000) {
@@ -351,7 +362,8 @@ class V10ExternalPackAcceptanceTest {
                             loaded
                         }
                     } catch (failure: Throwable) {
-                        throw AssertionError("H02 native link navigation: $navigationState", failure)
+                        val finalMetrics = runCatching { eval(s, targetMetrics) }.getOrNull()
+                        throw AssertionError("H02 native link navigation: $navigationState; before=$beforeScroll; after=$afterScroll; native=$touchMetrics; final=$finalMetrics", failure)
                     }
                     assertEquals("true", eval(s, "document.readyState==='complete' && !!document.getElementById('chapter-two')"))
                 }

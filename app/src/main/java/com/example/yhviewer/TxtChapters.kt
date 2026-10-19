@@ -56,6 +56,11 @@ object TxtChapters {
     /** 标题行：start = 行首，end = 行尾（换行符的位置） */
     private fun headings(text: String): List<TxtRange> {
         val out = ArrayList<TxtRange>()
+        // Android's ICU matcher owns native input storage. Creating a new matcher
+        // for every candidate can retain thousands of full-book native buffers
+        // until cleaners run, even while the Java heap looks healthy.
+        val matcher = HEADING_LINE.toPattern().matcher(text)
+            .useAnchoringBounds(false).useTransparentBounds(true)
         var lineStart = 0
         var consumed = 0
         while (lineStart < text.length) {
@@ -64,9 +69,10 @@ object TxtChapters {
             if (lineStart >= consumed && k < text.length && text[k] in HEADING_STARTS) {
                 // Match the original multiline expression at candidate starts. In particular,
                 // chapter\s* may span lines and neither the numeric part nor its whitespace is bounded.
-                HEADING_LINE.matchAt(text, lineStart)?.let { m ->
-                    out += TxtRange(m.value.trim(), m.range.first, m.range.last + 1)
-                    consumed = m.range.last + 1
+                matcher.region(lineStart, text.length)
+                if (matcher.lookingAt()) {
+                    out += TxtRange(matcher.group().trim(), matcher.start(), matcher.end())
+                    consumed = matcher.end()
                 }
             }
             while (lineStart < text.length && text[lineStart] !in "\n\u0085\u2028\u2029") lineStart++

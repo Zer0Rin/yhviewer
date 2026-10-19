@@ -51,9 +51,14 @@ object DocumentLoader {
     }
 
     suspend fun readText(context: Context, uri: Uri, maxBytes: Long): String = withContext(Dispatchers.IO) {
+        CharsetDetector.decode(readBytes(context, uri, maxBytes)).text
+    }
+
+    // End the growable buffer's ownership before allocating decoded text.
+    private fun readBytes(context: Context, uri: Uri, maxBytes: Long): ByteArray {
         val bytes = ByteArrayOutputStream()
         open(context, uri).use { copyLimited(it, bytes, maxBytes) }
-        CharsetDetector.decode(bytes.toByteArray()).text
+        return bytes.toByteArray()
     }
 
     suspend fun copyTo(context: Context, uri: Uri, dest: File, maxBytes: Long): Long = withContext(Dispatchers.IO) {

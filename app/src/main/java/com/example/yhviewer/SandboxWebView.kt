@@ -240,13 +240,18 @@ private class SandboxClient(
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
+        if (bookFrames && BuildConfig.DEBUG) Log.d("FlowNavigation", "main=${request.isForMainFrame} gesture=${request.hasGesture()} url=$url")
         if (Sandbox.isLocal(url, localHost)) {
             // The trusted shell never navigates. Even a top-targeted book link cannot replace it.
             if (request.isForMainFrame) return bookFrames || onInternalLink(url)
             val path = url.path.orEmpty()
             if (bookFrames && (path.startsWith("/book/") || path.startsWith("/txt/"))) {
                 // 用户点的链接：交给阅读器跳转（换章），iframe 本身不导航；外层页面创建章节 iframe：放行
-                if (request.hasGesture()) { onInternalLink(url); return true }
+                if (request.hasGesture()) {
+                    val routed = onInternalLink(url)
+                    if (BuildConfig.DEBUG) Log.d("FlowNavigation", "routed=$routed url=$url")
+                    return true
+                }
                 return false
             }
             // A child frame cannot navigate into private document endpoints.

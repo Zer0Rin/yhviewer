@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync(process.env.FLOW_SHELL_PATH || 'app/src/main/assets/book/flow.html', 'utf8');
 const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].at(-1)[1];
-function shell(heights, start = 0, ratio = 0) {
+function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html') {
   const jobs = [], intervals = [], events = {}, seen = new Set();
   const baseHeights = heights.slice();
   let requests = 0, maxFrames = 0;
@@ -26,7 +26,7 @@ function shell(heights, start = 0, ratio = 0) {
     getAttribute(k) { return this.attrs[k]; }
     addEventListener(k, f) { this.listeners[k] = f; }
     set src(url) {
-      this.url = url; this.index = Number(url.match(/\/(\d+)\.html/)[1]); requests++; seen.add(this.index);
+      this.url = url; this.index = Number(url.match(/(?:\/|c)(\d+)\.(?:html|xhtml)/)[1]); requests++; seen.add(this.index);
       const frame = this;
       let readingCss = '';
       // Browser layout changes when applyLive writes the style, after relayout
@@ -39,8 +39,17 @@ function shell(heights, start = 0, ratio = 0) {
           heights[frame.index] = baseHeights[frame.index] * (scale ? Number(scale[1]) : 1);
         }
       };
+      const childListeners = {};
       this.contentDocument = {
-        location: { href: url }, readyState: 'complete',
+        location: { href: new URL(url, 'https://appassets.androidplatform.net').href }, readyState: 'complete',
+        addEventListener(type, listener) { childListeners[type] = listener; },
+        dispatchClick(anchor, options = {}) {
+          let prevented = false;
+          const event = { isTrusted: options.trusted ?? true, button: options.button ?? 0,
+            defaultPrevented: false, target: anchor, preventDefault() { prevented = true; this.defaultPrevented = true; } };
+          childListeners.click?.(event);
+          return prevented;
+        },
         documentElement: { get scrollHeight() { return heights[frame.index]; }, setAttribute() {} },
         body: { get scrollHeight() { return heights[frame.index]; } },
         elementFromPoint(x, y) {
@@ -59,20 +68,53 @@ function shell(heights, start = 0, ratio = 0) {
   function checkFrames() { const n = flow?.children?.length || 0; maxFrames = Math.max(maxFrames, n); assert(n <= 5, `frame cap ${n}`); }
   const document = {
     documentElement: { get scrollHeight() { return Math.max(800, body.offsetHeight); }, clientHeight: 800, getAttribute: () => 'paper', setAttribute() {} },
-    getElementById: id => id === 'payload' ? { textContent: JSON.stringify({ count: heights.length, start, ratio, pattern: '/txt/{i}.html' }) } : id === 'flow' ? flow : continuation,
+    getElementById: id => id === 'payload' ? { textContent: JSON.stringify({ count: heights.length, start, ratio, pattern }) } : id === 'flow' ? flow : continuation,
     createElement: tag => new El(tag)
   };
-  const window = { innerHeight: 800, scrollY: 0,
+  const window = { innerHeight: 800, scrollY: 0, location: { origin: 'https://appassets.androidplatform.net' },
     scrollTo(x, y) { const next = Math.max(0, Math.min(y, document.documentElement.scrollHeight - 800)); if (next !== this.scrollY) { this.scrollY = next; jobs.push(() => events.scroll?.()); } },
     addEventListener: (name, fn) => { events[name] = fn; }
   };
-  vm.runInNewContext(script, { document, window, requestAnimationFrame: fn => jobs.push(fn), setInterval: fn => intervals.push(fn) });
+  vm.runInNewContext(script, { document, window, URL, requestAnimationFrame: fn => jobs.push(fn), setInterval: fn => intervals.push(fn) });
   function pump() { let n = 0; while (jobs.length) { assert(++n < 1000, 'unbounded load/evict loop'); jobs.shift()(); } checkFrames(); }
   function tick() { intervals.forEach(fn => fn()); pump(); }
   pump(); tick();
-  return { window, flow, seen, heights, tick, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
+  return { window, flow, start, seen, heights, tick, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
     state() { return window.YH.state().split(',').map(Number); },
     requests: () => requests, maxFrames: () => maxFrames };
+}
+function link(s, href, attrs = {}, options = {}) {
+  const d = s.flow.children.find(e => e.attrs['data-ch'] === String(s.start)).children[0].contentDocument;
+  const anchor = { tagName: 'A', href: new URL(href, d.location.href).href,
+    getAttribute: key => key === 'href' ? href : attrs[key] ?? null,
+    hasAttribute: key => Object.hasOwn(attrs, key), closest: selector => selector === 'a[href]' ? anchor : null };
+  return d.dispatchClick(anchor, options);
+}
+{
+  const s = shell(Array(8).fill(1600), 4, 0, '/book/OPS/c{i}.xhtml');
+  // Production-shell handler must stop ordinary iframe navigation and expose
+  // the single trusted destination for native consumption.
+  assert.equal(link(s, 'c7.xhtml#p12'), true, 'trusted relative chapter link captured');
+  assert.equal(s.window.YH.takeLink(), '/book/OPS/c7.xhtml#p12');
+  assert.equal(s.window.YH.takeLink(), '', 'link consumed once');
+  assert.equal(link(s, '#note'), true, 'same-chapter anchor captured');
+  assert.equal(s.window.YH.takeLink(), '/book/OPS/c4.xhtml#note');
+  for (const [href, attrs, options] of [
+    ['/book/OPS/c7.xhtml', {}, { trusted: false }],
+    ['https://example.invalid/escape', {}, {}],
+    ['https://evil.appassets.androidplatform.net/book/OPS/c7.xhtml', {}, {}],
+    ['/txt/7.html', {}, {}],
+    ['/book/OPS/c7.xhtml', { target: '_top' }, {}],
+    ['/book/OPS/c7.xhtml', { target: '_parent' }, {}],
+    ['/book/OPS/c7.xhtml', { target: '_blank' }, {}],
+    ['/book/OPS/c7.xhtml', { download: '' }, {}],
+    ['javascript:alert(1)', {}, {}],
+    ['/doc/index.html', {}, {}],
+    ['/book/OPS/c7.xhtml', {}, { button: 1 }],
+  ]) {
+    assert.equal(link(s, href, attrs, options), false, `blocked route ${href}`);
+    assert.equal(s.window.YH.takeLink(), '', `nothing queued for ${href}`);
+  }
 }
 function traverseTiny(start) {
   const s = shell(Array(18).fill(20), start);
@@ -145,4 +187,4 @@ for (const y of [900, 1500, 1700, 2500]) {
   assert.equal(s.state()[0], chapter);
   assert(Math.abs((s.window.scrollY - after.offsetTop) / s.heights[chapter] - fraction) < .0001, `font anchor ${y}`);
 }
-console.log('PASS actual flow shell: tiny forward/backward, bounded/stable frames, boundary/live/reopen offsets');
+console.log('PASS actual flow shell: trusted/blocked links, one-shot consume, tiny forward/backward, bounded/stable frames, boundary/live/reopen offsets');

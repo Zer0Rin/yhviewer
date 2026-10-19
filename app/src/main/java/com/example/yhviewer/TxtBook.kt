@@ -4,7 +4,6 @@ import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.Base64
-import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
@@ -111,14 +110,8 @@ object TxtIndex {
     }
 
     /** 严格 UTF-8 解码；副本有坏字节时返回 null（字节偏移会对不上，改走内存模式） */
-    fun strictUtf8(bytes: ByteArray): String? = try {
-        Charsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes)).toString()
-    } catch (_: CharacterCodingException) {
-        null
-    }
+    fun strictUtf8(bytes: ByteArray): String? = CharsetDetector.strictUtf8(bytes)
+
 }
 
 /**
@@ -183,13 +176,25 @@ class TxtBook private constructor(
             } }.getOrNull()
                 ?.let { TxtIndex.decode(it, size, mtime) }
                 ?.let { return TxtBook(file, it, null) }
-            return build(file, file.readBytes(), indexFile)
+            val raw = try {
+                java.io.InputStreamReader(file.inputStream(), Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)).buffered().use { it.readText() }
+            } catch (_: CharacterCodingException) {
+                return fromText(file.readText(Charsets.UTF_8))
+            }
+            return build(file, raw, indexFile)
         }
 
         /** 导入时用：已经有字节在手，直接建索引 */
         fun build(file: File, bytes: ByteArray, indexFile: File): TxtBook {
             val raw = TxtIndex.strictUtf8(bytes)
                 ?: return fromText(String(bytes, Charsets.UTF_8))
+            return build(file, raw, indexFile)
+        }
+
+        /** Import already decoded this source; do not allocate a second full text. */
+        fun build(file: File, raw: String, indexFile: File): TxtBook {
             val entries = TxtIndex.build(raw)
             runCatching {
                 indexFile.parentFile?.mkdirs()

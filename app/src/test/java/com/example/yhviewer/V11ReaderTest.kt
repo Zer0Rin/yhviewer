@@ -107,6 +107,19 @@ class TxtIndexTest {
         assertEquals(Legacy.split(raw).map { it.title }, TxtBook.open(file, idx).titles)
     }
 
+    @Test fun thousandsOfCandidateMatchesRetainLegacyBoundsAndCrossLineHeadings() {
+        val raw = buildString {
+            repeat(4000) { n ->
+                append(if (n % 3 == 0) "Chapter\r\n$n Cross-line" else "第${n + 1}章 标题")
+                append("\r\nbody ").append(n).append(" 😀\rchapter nonsense\r\n\r\n")
+            }
+        }
+        assertEquals(Legacy.split(raw), TxtChapters.split(raw))
+        val file = tmp.newFile("matcher-reuse").apply { writeText(raw) }
+        val book = TxtBook.build(file, raw, File(tmp.root, "matcher-reuse.idx"))
+        assertEquals(Legacy.split(raw), (0 until book.size).map(book::chapter))
+    }
+
     @Test fun byteRangesDecodeToTheSameChapters() {
         val r = Random(7)
         repeat(200) { k ->
@@ -156,6 +169,20 @@ class TxtIndexTest {
         // 副本被换掉（大小变了）→ 索引作废，重新切
         file.writeText("第一章 甲\n内容\n第二章 乙\n内容", Charsets.UTF_8)
         assertEquals(listOf("第一章 甲", "第二章 乙"), TxtBook.open(file, idx).titles)
+    }
+
+    @Test fun decodedImportAndReaderRebuildPreserveLegacyBodies() {
+        val raw = (1..8).joinToString("\r\n") { "第${it}章 😀\r\n" + "x".repeat(8191) + "😀\r内容\r\n尾声正文" }
+        val file = tmp.newFile("stream-reader").apply { writeText(raw) }
+        val index = File(tmp.root, "stream-reader.idx")
+        val expected = TxtChapters.split(raw)
+        assertEquals(expected, TxtBook.build(file, raw, index).let { book -> (0 until book.size).map(book::chapter) })
+        assertTrue(index.delete())
+        val rebuilt = TxtBook.open(file, index)
+        assertEquals(expected, (0 until rebuilt.size).map(rebuilt::chapter))
+        val invalid = tmp.newFile("stream-invalid").apply { writeBytes(raw.toByteArray() + byteArrayOf(0xff.toByte())) }
+        val fallback = TxtBook.open(invalid, File(tmp.root, "invalid.idx"))
+        assertEquals(TxtChapters.split(String(invalid.readBytes(), Charsets.UTF_8)), (0 until fallback.size).map(fallback::chapter))
     }
 
     @Test fun invalidUtf8FallsBackToMemory() {
