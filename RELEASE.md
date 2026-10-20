@@ -1,6 +1,6 @@
 # 发布手册
 
-本轮发布版本：`0.7.0`（versionCode `8`），正式 applicationId：`io.github.zer0rin.yhviewer`。用户已于 2026-10-19 确认 PR #7 正式签名候选包的覆盖安装及功能真机验收通过，并授权合并到 main、发布 v0.7.0；说明见 [v0.7.0](docs/releases/v0.7.0.md)。
+本轮发布版本：`0.8.0`（versionCode `9`），正式 applicationId：`io.github.zer0rin.yhviewer`。用户已于2026-10-20确认正式签名v12候选的大TXT首次/再次打开、跨章连续滚动、目录快速滚动条、Aa实时排版、搜索和书签跳转真机验收通过，并授权合并PR #8到main、发布v0.8.0；说明见 [v0.8.0](docs/releases/v0.8.0.md)。
 
 正式密钥和 GitHub Secrets 已配置，v0.2.0 签名 R8 包已完成 API 35 真机冒烟；v0.3.0 正式签名 Standard 候选已由用户覆盖安装，并确认 8 条记录与阅读进度保留；详见 [本轮验收](docs/verification/EDITOR_PYTHON.md)；记录见 [真机验收](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md)。手动运行 Release 工作流只构建正式签名候选包；推送版本 tag 才会创建公开 Release。临时验证密钥不能用于正式发布。代码 namespace 保持 `com.example.yhviewer`。
 

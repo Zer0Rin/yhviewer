@@ -9,9 +9,9 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
-**v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
+**v0.8.0** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters, live reading layout controls and a draggable TOC fast scroller. Aa retains the single-chapter option. Large-TXT heading matching uses bounded line windows while preserving legacy chapter semantics. See [release notes](docs/releases/v0.8.0.md), [verification](docs/verification/V08_VERIFICATION.md) and [v0.8.0 downloads](https://github.com/Zer0Rin/yhviewer/releases/tag/v0.8.0).
 
-The **v0.8.0 candidate** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters and a draggable TOC fast scroller. It keeps the single-chapter option in Aa. See [candidate notes](docs/releases/v0.8.0.md) and [verification progress](docs/verification/V08_VERIFICATION.md); [signed v12 test APKs](https://github.com/Zer0Rin/yhviewer/releases/tag/pr-8-test-v12) are available; v0.7.0 remains the stable release.
+**v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
@@ -27,7 +27,7 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|
 | ![](docs/screenshots/v07-import-report.png) | ![](docs/screenshots/v07-book-search.png) |
 
-| Continuous boundary (candidate) | Filtered TOC while dragging (candidate) |
+| Continuous boundary | Filtered TOC while dragging |
 |---|---|
 | ![](docs/screenshots/v08-continuous-boundary.png) | ![](docs/screenshots/v08-toc-fast-scroll.png) |
 
@@ -54,7 +54,7 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 | **Python execution (Standard)** | Bundled offline Pyodide / CPython standard library, separate startup and execution deadlines, Unicode output and user-code error lines; no external network or package downloads |
 | **Code editing** | Offline CodeMirror 6 for code, plain text, Markdown and HTML up to 1,000,000 characters; syntax highlighting, search, undo/redo and a keyboard symbol bar. Run unsaved JS or Python snapshots |
 | **Code** | File-type detection, line numbers excluded from copied text, wrap toggle and bundled syntax highlighting. Compact JSON up to 500,000 characters is formatted; large files skip highlighting and render in 200-line chunks |
-| **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents; v0.8 candidate adds a persistent byte index and lazy chapter reads |
+| **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents; v0.8 adds a persistent byte index and lazy chapter reads |
 | **EPUB** | EPUB 2 and 3, title and TOC from nav / NCX, images and publisher CSS, book scripts never run |
 
 Reading and library features:
