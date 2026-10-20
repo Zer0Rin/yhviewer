@@ -8,6 +8,9 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -59,6 +63,13 @@ enum class SettingsScope {
 }
 
 private val GLASS_SHAPE = RoundedCornerShape(24.dp)
+
+/** v15：面板顶端最高到状态栏下方这么远（留出阅读页顶栏的位置） */
+private val SHEET_TOP_GAP = 56.dp
+/** M3 默认拖拽把手占的高度（上下各 22dp 边距 + 4dp 横线） */
+private val DRAG_HANDLE_HEIGHT = 48.dp
+/** 超过这么多章，进度滑杆不画刻度 */
+private const val MAX_TICKED_CHAPTERS = 60
 
 /**
  * 阅读设置（从底部弹出）。
@@ -157,11 +168,23 @@ fun ReaderSettingsSheet(
         containerColor = container,
         scrimColor = scrim,
         tonalElevation = 0.dp,
-        dragHandle = { Box(Modifier.graphicsLayer { alpha = chrome }) { BottomSheetDefaults.DragHandle() } },
+        dragHandle = {
+            Box(Modifier.graphicsLayer { alpha = chrome }.testTag("reader-aa-sheet-handle")) {
+                BottomSheetDefaults.DragHandle()
+            }
+        },
     ) {
+        // v15：内容比屏幕高时（EPUB 有"进度"一行，面板比 TXT 高），M3 会把面板一直展开到屏幕顶端、
+        // 盖住状态栏，把手上方多出一块空白，看起来像面板在自己往上爬。这里把面板限制在状态栏下方
+        // SHEET_TOP_GAP 处，多出的内容在面板里滚动；内容不高时不受影响（和 TXT 一样贴着内容）。
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cap = if (constraints.hasBoundedHeight) {
+            (maxHeight - SHEET_TOP_GAP - DRAG_HANDLE_HEIGHT).coerceAtLeast(240.dp)
+        } else Dp.Infinity
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = cap)
                 .verticalScroll(rememberScrollState(), enabled = !dragging)
                 .padding(horizontal = 8.dp)
                 .padding(bottom = 16.dp)
@@ -182,7 +205,8 @@ fun ReaderSettingsSheet(
                             value = draft,
                             onValueChange = { draft = it },
                             valueRange = 0f..(chapterCount - 1).toFloat(),
-                            steps = (chapterCount - 2).coerceAtLeast(0),
+                            // v15：章节很多时不画刻度（上千个刻度每帧都要画，面板动画会变慢），拖动时按章取整
+                            steps = if (chapterCount <= MAX_TICKED_CHAPTERS) (chapterCount - 2).coerceAtLeast(0) else 0,
                             onValueChangeFinished = { onChapter(draft.roundToInt()) },
                         )
                     }
@@ -260,6 +284,7 @@ fun ReaderSettingsSheet(
                     SwitchRow("阅读时屏幕常亮", reading.keepScreenOn) { onReading(reading.copy(keepScreenOn = it)) }
                 }
             }
+        }
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.yhviewer
 
 import android.content.Intent
+import android.content.res.Resources
 import android.graphics.Color
 import android.os.SystemClock
 import android.view.Gravity
@@ -194,6 +195,43 @@ class V11FlowAcceptanceTest {
     }
 
     @Test fun continuousIsTheDefault() { assertTrue(ReadingPrefs().continuous) }
+
+    @Test fun tallEpubAaSheetStaysBelowStatusBarInContinuousMode() = verifyTallEpubAaSheet(true)
+
+    @Test fun tallEpubAaSheetStaysBelowStatusBarInSinglePageMode() = verifyTallEpubAaSheet(false)
+
+    private fun verifyTallEpubAaSheet(continuous: Boolean) {
+        val id = runBlocking { fixtures.import(fixtures.epub(count = 1415)) }
+        ReadingPrefsStore(context).save(ReadingPrefs(continuous = continuous))
+        launch().use { s ->
+            if (continuous) open(s, id) else {
+                model(s) { it.openBook(id) }
+                compose.waitUntil(25_000) {
+                    var ready = false
+                    model(s) { ready = (it.reader as? ReaderState.Ready)?.doc?.bookId == id }
+                    ready && url(s) != null
+                }
+                compose.waitForIdle()
+            }
+            compose.onNodeWithText("Aa").performClick()
+            compose.waitForIdle()
+            SystemClock.sleep(500)
+            val mode = if (continuous) "continuous" else "single"
+            val first = compose.onNodeWithTag("reader-aa-sheet-handle", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.top
+            exportV7Screenshot("v15-tall-epub-$mode-500ms.png")
+            SystemClock.sleep(1_500)
+            val handle = compose.onNodeWithTag("reader-aa-sheet-handle", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+            assertEquals("Aa sheet top should stay fixed after opening (continuous=$continuous)", first, handle.top, 1f)
+            val statusBarHeight = Resources.getSystem().getDimensionPixelSize(
+                Resources.getSystem().getIdentifier("status_bar_height", "dimen", "android"),
+            )
+            val minTop = statusBarHeight + 56f * context.resources.displayMetrics.density
+            assertTrue("Aa sheet should remain below status bar plus 56dp (continuous=$continuous): ${handle.top} < $minTop", handle.top >= minTop - 1f)
+            exportV7Screenshot("v15-tall-epub-$mode-2000ms.png")
+            compose.onNodeWithText("阅读时屏幕常亮").performScrollTo().assertIsDisplayed()
+            exportV7Screenshot("v15-tall-epub-$mode-bottom.png")
+        }
+    }
 
     @Test fun v14ThemeUpdatesAllFramesSynchronouslyAndGlassStatesCanBeCaptured() {
         val id = runBlocking { fixtures.import(fixtures.txt()) }
