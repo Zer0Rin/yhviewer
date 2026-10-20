@@ -280,6 +280,34 @@
     };
     window.setReading = function (css) { reading = String(css); relayout(); };
 
+    // v13：液态玻璃。原生控件（底部胶囊、拖动中的滑杆）在这些位置，页面把它们下面的内容模糊掉（见 Glass.kt）
+    window.yhGlass = function (rects) {
+      var host = document.getElementById('yh-glass');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'yh-glass';
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483647';
+        document.documentElement.appendChild(host);
+      }
+      rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      while (host.children.length < rects.length) {
+        var d = document.createElement('div');
+        d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .16s;' +
+          'background:color-mix(in srgb, var(--bg) 30%, transparent);' +
+          '-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6)';
+        host.appendChild(d);
+      }
+      for (var i = 0; i < host.children.length; i++) {
+        var el = host.children[i], r = rects[i];
+        if (!r) { el.style.opacity = '0'; continue; }
+        el.style.left = (+r.x || 0) + 'px'; el.style.top = (+r.y || 0) + 'px';
+        el.style.width = Math.max(0, +r.w || 0) + 'px'; el.style.height = Math.max(0, +r.h || 0) + 'px';
+        el.style.borderRadius = Math.max(0, +r.r || 0) + 'px';
+        el.style.opacity = '1';
+      }
+    };
+
     window.YH = {
       state: function () {
         if (!ready) return '';

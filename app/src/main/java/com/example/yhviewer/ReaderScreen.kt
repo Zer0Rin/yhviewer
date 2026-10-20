@@ -1,6 +1,10 @@
 package com.example.yhviewer
 
 import android.app.Activity
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import android.net.Uri
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberUpdatedState
@@ -97,8 +101,13 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
         EditorScreen(vm, doc) {}
         return
     }
-    var menuOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var permissionsOpen by remember { mutableStateOf(false) }
+    // v13：Aa 面板（字号等），拖动滑杆时顶栏隐去；Markdown 页面能做背景模糊
+    var sliderDragging by remember { mutableStateOf(false) }
+    val glass = remember { GlassHost() }
+    val isMarkdown = type == DocType.MARKDOWN
+    SideEffect { glass.supported = isMarkdown }
     // Retain the source across reader errors; renderer loss can affect both WebViews.
     var runRequest by remember(vm.documentSession) { mutableStateOf<RunRequest?>(null) }
     // v10：页内查找、书签、缺失资源提示
@@ -112,9 +121,13 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     }.collectAsState(initial = emptyList())
     BackHandler(enabled = find.open) { find.open = false; find.lastSearched = null; handle.clearFind() }
 
+    GlassBridge(glass, handle)
+    val chromeAlpha by androidx.compose.animation.core.animateFloatAsState(if (sliderDragging) 0f else 1f, tween(160), label = "chrome")
+    CompositionLocalProvider(LocalGlassHost provides glass) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { Column {
+        // 拖动滑杆时顶栏只做透明，不移除（移除会改变正文区域高度，正文会跳）
+        topBar = { Column(Modifier.graphicsLayer { alpha = chromeAlpha }) {
             if (find.open) {
                 FindBar(find, handle, onClose = { find.open = false; find.lastSearched = null; handle.clearFind() }, onBookSearch = null)
             } else TopAppBar(
@@ -146,25 +159,9 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
                             }
                         }
                     }
-                    if (doc != null && type != DocType.HTML) { // 原样 HTML 不套主题
-                        Box {
-                            TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读主题" }) { Text("Aa") }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                ReaderTheme.entries.forEach { t ->
-                                    DropdownMenuItem(
-                                        text = { Text((if (t == vm.theme) "✓ " else "    ") + t.label) },
-                                        onClick = { vm.selectTheme(t); menuOpen = false },
-                                    )
-                                }
-                                if (type == DocType.CODE || type == DocType.UNKNOWN) {
-                                    HorizontalDivider()
-                                    DropdownMenuItem(
-                                        text = { Text((if (vm.wrap) "✓ " else "    ") + "自动换行") },
-                                        onClick = { vm.toggleWrap(); menuOpen = false },
-                                    )
-                                }
-                            }
-                        }
+                    // v13：所有单页文档都有 Aa：Markdown 可调字号、行距、页边距、字体；代码可调字号；HTML 只调字号
+                    if (doc != null) {
+                        TextButton(onClick = { settingsOpen = true }, modifier = Modifier.semantics { contentDescription = "阅读主题" }) { Text("Aa") }
                     }
                 },
             )
@@ -182,8 +179,29 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
         when (state) {
             ReaderState.Loading -> Box(m, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             is ReaderState.Error -> CenterText("打开失败：${state.message}", m)
-            is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m, handle, find)
+            is ReaderState.Ready -> if (doc != null) SingleContent(vm, doc, m, handle, find, onPageReady = glass::pageLoaded)
         }
+    }
+    if (settingsOpen && doc != null) {
+        val scope = when {
+            doc.doc.isSvg && !vm.svgSource -> SettingsScope.IMAGE
+            type == DocType.HTML -> SettingsScope.HTML
+            type == DocType.MARKDOWN -> SettingsScope.MARKDOWN
+            else -> SettingsScope.CODE
+        }
+        ReaderSettingsSheet(
+            theme = vm.theme,
+            onTheme = vm::selectTheme,
+            reading = vm.docReading,
+            onReading = vm::updateDocReading,
+            onPreview = vm::previewDocReading,
+            onDraggingChange = { sliderDragging = it },
+            onDismiss = { settingsOpen = false; sliderDragging = false },
+            scope = scope,
+            wrap = vm.wrap.takeIf { scope == SettingsScope.CODE },
+            onWrap = vm::toggleWrap,
+        )
+    }
     }
     runRequest?.let { request ->
         RunSheet(request.code, request.fileName, vm.theme, lang = request.lang, onDismiss = { runRequest = null })
@@ -203,12 +221,22 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
 }
 
 @Composable
-private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: Modifier, handle: WebViewHandle, find: FindState) {
+private fun SingleContent(
+    vm: ShelfViewModel,
+    doc: OpenedDoc.Single,
+    modifier: Modifier,
+    handle: WebViewHandle,
+    find: FindState,
+    onPageReady: () -> Unit = {},
+) {
     val context = LocalContext.current
     val session = vm.documentSession
     val isHtml = doc.doc.type == DocType.HTML
     key(vm.documentSession, doc.bookId, doc.permissions, vm.jumpTick, vm.svgSource) {
-        val html = remember(doc, vm.svgSource) { doc.doc.toDisplayHtml(context, vm.theme, vm.wrap, vm.svgSource) }
+        val isMarkdown = doc.doc.type == DocType.MARKDOWN
+        val html = remember(doc, vm.svgSource) {
+            doc.doc.toDisplayHtml(context, vm.theme, vm.wrap, vm.svgSource, vm.docReading.toCss().takeIf { isMarkdown }.orEmpty())
+        }
         // v10：文件夹导入的 HTML / Markdown 挂在 /bundle/ 下，相对路径的资源可用
         val source = doc.bundle?.let { PageSource.BundleFile(it.rootDir, it.relPath, html) } ?: PageSource.Html(html)
         HtmlView(
@@ -223,7 +251,10 @@ private fun SingleContent(vm: ShelfViewModel, doc: OpenedDoc.Single, modifier: M
             storageProfileId = doc.bookId.takeIf { isHtml },
             handle = handle,
             onPageLoading = { find.pageLoading(); handle.clearFind() },
-            onPageReady = { find.replay(handle) },
+            onPageReady = { find.replay(handle); onPageReady() },
+            // v13：Markdown 用 CSS 变量（字号、行距、页边距、字体，实时生效）；HTML 和代码用 WebView 文字缩放（只改字号，不动网页布局）
+            reading = vm.liveDocReading.toCss().takeIf { isMarkdown },
+            textZoom = vm.liveDocReading.fontScale.takeIf { !isMarkdown && !(doc.doc.isSvg && !vm.svgSource) },
             onMissingLocal = { if (session == vm.documentSession) vm.reportMissing(it) },
             dialogSource = doc.name,
         )
@@ -238,6 +269,12 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
     val titles = chapterTitles(doc)
     var barsVisible by remember { mutableStateOf(true) }
     var settingsOpen by remember { mutableStateOf(false) }
+    // v13：拖动 Aa 里的滑杆时隐去顶栏和底部胶囊；液态玻璃（Glass.kt）
+    var sliderDragging by remember { mutableStateOf(false) }
+    val glass = remember { GlassHost() }
+    // EPUB 单章模式禁用 JS，页面做不了背景模糊
+    val glassSupported = vm.reading.continuous || doc is OpenedDoc.Txt
+    SideEffect { glass.supported = glassSupported }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
@@ -257,8 +294,10 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
         val pending = vm.pendingFind
         vm.consumePendingFind()
         find.replay(handle, pending)
+        glass.pageLoaded()
     }
     val onPageLoading: () -> Unit = { find.pageLoading(); handle.clearFind() }
+    GlassBridge(glass, handle)
 
     ImmersiveSystemBars(hidden = !barsVisible, darkIcons = !palette.dark)
     KeepScreenOn(vm.reading.keepScreenOn)
@@ -272,6 +311,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
         onReachStart = if (flow) ({}) else vm::prevChapterFromStart,
     )
 
+    CompositionLocalProvider(LocalGlassHost provides glass) {
     // v7: keep edge gestures for page turning/system back until explicitly opened.
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -305,7 +345,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             )
 
             AnimatedVisibility(
-                visible = barsVisible || find.open,
+                visible = (barsVisible || find.open) && !sliderDragging,
                 enter = slideInVertically { -it } + fadeIn(),
                 exit = slideOutVertically { -it } + fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -333,10 +373,11 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 notice?.let { ReaderNotice(it, onClose = { notice = null }) }
             } }
 
+            // v13：底部胶囊是液态玻璃，只淡入淡出（不滑动），页面里的模糊区域能和它对齐
             AnimatedVisibility(
-                visible = barsVisible,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+                visible = barsVisible && !sliderDragging,
+                enter = fadeIn(tween(160)),
+                exit = fadeOut(tween(160)),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 ChapterBar(
@@ -366,10 +407,12 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             onTheme = vm::selectTheme,
             reading = vm.reading,
             onReading = vm::updateReading,
+            onPreview = vm::previewReading,
+            onDraggingChange = { sliderDragging = it },
             chapter = vm.chapter,
             chapterCount = titles.size,
             onChapter = { vm.goToChapter(it) },
-            onDismiss = { settingsOpen = false },
+            onDismiss = { settingsOpen = false; sliderDragging = false },
             onBookmark = {
                 settingsOpen = false
                 val title = titles.getOrNull(vm.chapter)
@@ -379,6 +422,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 }
             },
         )
+    }
     }
 }
 
@@ -419,7 +463,7 @@ private fun BookContent(
                 source = PageSource.Html(page),
                 modifier = modifier,
                 theme = vm.theme,
-                reading = vm.reading.toCss(),
+                reading = vm.liveReading.toCss(),
                 initialRatio = vm.initialRatio(),
                 onRatioChanged = { vm.onScroll(session, index, it) },
                 onRendererGone = { vm.onRendererGone(session, index) },
@@ -475,7 +519,7 @@ private fun FlowContent(
     val session = vm.documentSession
     val jump = vm.jumpTick
     key(session, doc.bookId, jump) {
-        val readingCss = vm.reading.toCss() + if ((doc as? OpenedDoc.Epub)?.vertical == true) EpubInjector.HORIZONTAL_CSS else ""
+        val readingCss = vm.liveReading.toCss() + if ((doc as? OpenedDoc.Epub)?.vertical == true) EpubInjector.HORIZONTAL_CSS else ""
         val source = remember {
             val urls = (doc as? OpenedDoc.Epub)?.chapters?.map { ch -> FlowShell.bookPath(ch.path) { Uri.encode(it) } }
             val shell = FlowShell.render(
@@ -610,7 +654,7 @@ private fun chapterTitles(doc: OpenedDoc): List<String> = when (doc) {
 @Composable
 private fun ChapterBar(index: Int, count: Int, onPrev: () -> Unit, onNext: () -> Unit) {
     // 浮动胶囊（Lens）：不再是贴底的整条工具栏，正文在胶囊两侧和下方仍然可见
-    FloatingCapsule {
+    FloatingCapsule(glassKey = "chapter-bar") {
         TextButton(onClick = onPrev, enabled = index > 0) { Text("‹ 上一章") }
         Text(
             if (count > 1) "${index + 1} / $count" else "",

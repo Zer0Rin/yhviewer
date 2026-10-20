@@ -108,13 +108,18 @@ class V2ReaderIntegrationTest {
     private fun waitText(text: String) = compose.waitUntil(25_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
-        // Book chips scroll horizontally on narrow screens; an offscreen coordinate click
-        // can hit the sheet scrim instead. Code retains its ordinary dropdown.
-        val bookSheet = compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()
-        val option = compose.onNode(hasText(label, substring = true))
-        if (bookSheet) option.performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
-        else option.performClick()
-        if (bookSheet) androidx.test.espresso.Espresso.pressBack()
+        // Both book and document settings now use the Aa bottom sheet. The theme chip row
+        // can scroll horizontally on narrow screens, so bring the selected option into view.
+        val settingsSheet = compose.onAllNodesWithText("主题").fetchSemanticsNodes().isNotEmpty()
+        if (settingsSheet && label == "自动换行") {
+            // It moved from a menu item to the CODE sheet's Switch.
+            compose.onNode(isToggleable()).performClick()
+        } else {
+            val option = compose.onNode(hasText(label, substring = true))
+            if (settingsSheet) option.performScrollTo().assertIsDisplayed().performClick()
+            else option.performClick()
+        }
+        if (settingsSheet) androidx.test.espresso.Espresso.pressBack()
     }
     private fun nativeRatio(s: ActivityScenario<MainActivity>): Float {
         var result = -1f

@@ -376,6 +376,8 @@ fun HtmlView(
     onMissingLocal: (List<String>) -> Unit = {},
     /** v10：页面弹窗对话框的标题，写明来源文档 */
     dialogSource: String = "页面",
+    /** v13：文字缩放（百分比）。原样 HTML 和代码用它调字号，不改网页自己的布局 */
+    textZoom: Int? = null,
 ) {
     val effective = if (source is PageSource.BookFile || source is PageSource.Flow) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
@@ -400,6 +402,11 @@ fun HtmlView(
     val missing = remember { MissingResourceAccumulator() }
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
+
+    LaunchedEffect(textZoom, webView) {
+        val view = webView ?: return@LaunchedEffect
+        if (textZoom != null && view.settings.textZoom != textZoom) view.settings.textZoom = textZoom
+    }
 
     // One effect handles initial readiness and subsequent changes. In particular, a selection
     // made before page scripts exist is applied once onPageFinished increments pageLoads.
@@ -493,6 +500,7 @@ fun HtmlView(
                 view.apply {
                     // v11：连续滚动的外层页面是我们自己的脚本；章节在沙箱 iframe 里，脚本被 sandbox 和 CSP 双重禁止
                     applySandboxSettings(allowJs = source is PageSource.Flow || (source !is PageSource.BookFile && effective.scripts))
+                    textZoom?.let { settings.textZoom = it }
                     // v10：页面弹窗。不设置 WebChromeClient 时 alert() 会被静默丢弃，用户以为按钮坏了
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         private fun show(req: JsDialogRequest): Boolean {

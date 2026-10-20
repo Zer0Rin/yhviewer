@@ -20,13 +20,18 @@ object MarkdownRenderer {
             .use { it.readText() }
             .also { cachedTemplate = it }
 
-    fun render(markdown: String, template: String, theme: ReaderTheme = ReaderTheme.AUTO): String {
+    /** v13：模板里放排版 CSS 的位置（Aa 的字号、行距等） */
+    const val READING_PLACEHOLDER = "/*MD_READING*/"
+
+    fun render(markdown: String, template: String, theme: ReaderTheme = ReaderTheme.AUTO, readingCss: String = ""): String {
         require(PLACEHOLDER in template) { "template is missing $PLACEHOLDER" }
+        require('<' !in readingCss) { "Unsafe reading CSS" }
         // 顺序很重要：先替换主题，再塞入用户内容。
         // 反过来的话，文档里恰好写了 "__THEME__" 也会被替换掉，用户内容就被篡改了。
         // theme.id 来自枚举（白名单），不可能注入任意字符串。
         return template
             .replace(THEME_PLACEHOLDER, theme.id)
+            .replace(READING_PLACEHOLDER, readingCss) // 只含数字和固定字符串，在用户内容之前替换
             .replace(PLACEHOLDER, toJsonString(markdown))
     }
 
