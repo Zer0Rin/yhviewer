@@ -51,4 +51,6 @@
 
 - [x] Generate one complete diff package from9e78f19 to final head and request most-capable available whole-branch review; batch any required final fixes in one wave and recheck.
 - [x] Confirm fresh checks match final source/test commits, worktree clean and artifacts/screenshots contain only synthetic data.
-- [ ] Push codex/v08-reading-flow, open PR against main with feature/validation/limitations description, attach PR to chat. No merge/release/phone operation.
+- [x] Push codex/v08-reading-flow, open PR against main with feature/validation/limitations description, attach PR to chat. No merge/release/phone operation.
+
+Completed: [PR #8](https://github.com/Zer0Rin/yhviewer/pull/8), open against main and attached to the task. Final source/test commit `fca8004` passed [full API34 CI](https://github.com/Zer0Rin/yhviewer/actions/runs/39345002625); later commits contain documentation/screenshots only. No merge, tag, release or phone operation.
