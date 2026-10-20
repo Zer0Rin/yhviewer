@@ -57,29 +57,44 @@ data class ReadingPrefs(
     }
 }
 
-class ReadingPrefsStore(context: Context) {
+/**
+ * 偏好存储。书（TXT / EPUB）用默认前缀；v13 起 Markdown / HTML / 代码用 "doc_" 前缀单独存一份，
+ * 两边的字号互不影响（网页和小说的合适字号差别很大）。
+ */
+class ReadingPrefsStore(
+    context: Context,
+    private val prefix: String = "",
+    private val defaults: ReadingPrefs = ReadingPrefs(),
+) {
     private val prefs = context.getSharedPreferences("reader_prefs", Context.MODE_PRIVATE)
+    private fun k(name: String) = prefix + name
 
     fun load() = ReadingPrefs(
-        fontScale = prefs.getInt("read_scale", 100),
-        lineHeight = prefs.getFloat("read_line", 1.9f),
-        margin = prefs.getInt("read_margin", 20),
-        font = ReadingFont.fromId(prefs.getString("read_font", null)),
-        tapToTurn = prefs.getBoolean("read_tap_turn", true),
-        keepScreenOn = prefs.getBoolean("read_keep_on", false),
-        continuous = prefs.getBoolean("read_continuous", true),
+        fontScale = prefs.getInt(k("read_scale"), defaults.fontScale),
+        lineHeight = prefs.getFloat(k("read_line"), defaults.lineHeight),
+        margin = prefs.getInt(k("read_margin"), defaults.margin),
+        font = ReadingFont.fromId(prefs.getString(k("read_font"), defaults.font.id)),
+        tapToTurn = prefs.getBoolean(k("read_tap_turn"), defaults.tapToTurn),
+        keepScreenOn = prefs.getBoolean(k("read_keep_on"), defaults.keepScreenOn),
+        continuous = prefs.getBoolean(k("read_continuous"), defaults.continuous),
     ).normalized()
 
     fun save(value: ReadingPrefs) {
         val p = value.normalized()
         prefs.edit()
-            .putInt("read_scale", p.fontScale)
-            .putFloat("read_line", p.lineHeight)
-            .putInt("read_margin", p.margin)
-            .putString("read_font", p.font.id)
-            .putBoolean("read_tap_turn", p.tapToTurn)
-            .putBoolean("read_keep_on", p.keepScreenOn)
-            .putBoolean("read_continuous", p.continuous)
+            .putInt(k("read_scale"), p.fontScale)
+            .putFloat(k("read_line"), p.lineHeight)
+            .putInt(k("read_margin"), p.margin)
+            .putString(k("read_font"), p.font.id)
+            .putBoolean(k("read_tap_turn"), p.tapToTurn)
+            .putBoolean(k("read_keep_on"), p.keepScreenOn)
+            .putBoolean(k("read_continuous"), p.continuous)
             .apply()
+    }
+
+    companion object {
+        const val DOC_PREFIX = "doc_"
+        /** Markdown 模板原本的排版：17px、行距 1.75、左右 18px */
+        val DOC_DEFAULTS = ReadingPrefs(lineHeight = 1.75f, margin = 18)
     }
 }

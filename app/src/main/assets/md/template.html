@@ -7,9 +7,12 @@
   <link rel="stylesheet" href="/assets/shared/themes.css">
   <style>
 /* ================= 通用排版（所有主题共用，只读变量） ================= */
+    /* v13：字号、行距、页边距、字体可调（Aa）。默认值等于原来的排版；实际值由 #reading 覆盖（ReadingPrefs.toCss） */
+    :where(:root) { --read-scale: 1; --read-line: var(--line); --read-margin: 18px; --read-font: var(--font-body); }
     body {
-      margin: 0 auto; max-width: var(--width); padding: 16px 18px 48px;
-      color: var(--fg); font: var(--size)/var(--line) var(--font-body);
+      margin: 0 auto; max-width: var(--width); padding: 16px var(--read-margin) 48px;
+      color: var(--fg);
+      font-size: calc(var(--size) * var(--read-scale)); line-height: var(--read-line); font-family: var(--read-font);
       word-wrap: break-word; -webkit-text-size-adjust: 100%;
     }
     h1, h2, h3, h4, h5, h6 { color: var(--heading); line-height: 1.3; margin: 1.6em 0 .6em; font-weight: 650; }
@@ -59,6 +62,7 @@
     .footnotes { font-size: .88em; color: var(--muted); }
     .footnote-ref a, .footnote-backref { text-decoration: none; }
 </style>
+  <style id="reading">/*MD_READING*/</style>
 </head>
 <body>
   <main id="content"></main>
@@ -72,9 +76,41 @@
   <script src="/assets/md/markdown-it-footnote.min.js"></script>
   <script>
     // 供 Kotlin 通过 evaluateJavascript 实时切换主题（白名单，不接受任意字符串）
+    // v13：字号、行距等实时调整：只替换一条 CSS 变量规则
+    window.setReading = function (css) {
+      document.getElementById('reading').textContent = String(css);
+    };
     window.setTheme = function (t) {
       if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) >= 0) {
         document.documentElement.setAttribute('data-theme', t);
+      }
+    };
+
+    // v13：液态玻璃。原生控件（底部胶囊、拖动中的滑杆）在这些位置，页面把它们下面的内容模糊掉（见 Glass.kt）
+    window.yhGlass = function (rects) {
+      var host = document.getElementById('yh-glass');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'yh-glass';
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483647';
+        document.documentElement.appendChild(host);
+      }
+      rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      while (host.children.length < rects.length) {
+        var d = document.createElement('div');
+        d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .16s;' +
+          'background:color-mix(in srgb, var(--bg) 14%, transparent);' +
+          '-webkit-backdrop-filter:blur(16px) saturate(1.5);backdrop-filter:blur(16px) saturate(1.5)';
+        host.appendChild(d);
+      }
+      for (var i = 0; i < host.children.length; i++) {
+        var el = host.children[i], r = rects[i];
+        if (!r) { el.style.opacity = '0'; continue; }
+        el.style.left = (+r.x || 0) + 'px'; el.style.top = (+r.y || 0) + 'px';
+        el.style.width = Math.max(0, +r.w || 0) + 'px'; el.style.height = Math.max(0, +r.h || 0) + 'px';
+        el.style.borderRadius = Math.max(0, +r.r || 0) + 'px';
+        el.style.opacity = '1';
       }
     };
 

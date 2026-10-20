@@ -102,11 +102,13 @@ fun LoadedDoc.toDisplayHtml(
     theme: ReaderTheme = ReaderTheme.AUTO,
     wrap: Boolean = false,
     svgSource: Boolean = false,
+    /** v13：Markdown 的字号、行距等（ReadingPrefs.toCss） */
+    readingCss: String = "",
 ): String = when {
     // v10：SVG 默认以图片显示（<img> 里的 SVG 不执行脚本、不加载外部资源），菜单可切回源码
     isSvg && !svgSource -> SvgRenderer.render(text, theme)
     type == DocType.HTML -> text
-    type == DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme)
+    type == DocType.MARKDOWN -> MarkdownRenderer.render(text, MarkdownRenderer.template(context), theme, readingCss)
     else -> CodeRenderer.render(
         text = text,
         lang = CodeLanguages.forFileName(name) ?: "plaintext",

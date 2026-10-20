@@ -37,6 +37,8 @@ import java.io.IOException
 sealed interface Screen {
     data object Shelf : Screen
     data object Reader : Screen
+    /** v16：设置 / 关于 */
+    data object Settings : Screen
 }
 
 sealed interface ReaderState {
@@ -50,6 +52,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ShelfRepository(app, AppDatabase.get(app))
     private val themeStore = ThemeStore(app)
     private val readingStore = ReadingPrefsStore(app)
+    private val docReadingStore = ReadingPrefsStore(app, ReadingPrefsStore.DOC_PREFIX, ReadingPrefsStore.DOC_DEFAULTS)
     private val prefs = app.getSharedPreferences("reader_prefs", Context.MODE_PRIVATE)
 
     /** 启动时先清理孤儿文件；导入要等它做完，避免误删正在写入的新副本 */
@@ -85,7 +88,30 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateReading(value: ReadingPrefs) {
         reading = value.normalized()
+        readingPreview = null
         readingStore.save(reading)
+    }
+
+    /**
+     * v13：拖动滑杆时的实时预览（不写盘）。能实时改 CSS 的页面（TXT、连续滚动、Markdown）用 live 值，
+     * EPUB 单章模式仍按已保存的值（每次变化都要重新加载章节）。松手时 updateReading 提交并清掉预览。
+     */
+    var readingPreview by mutableStateOf<ReadingPrefs?>(null)
+        private set
+    val liveReading: ReadingPrefs get() = readingPreview ?: reading
+    fun previewReading(value: ReadingPrefs?) { readingPreview = value?.normalized() }
+
+    /** v13：Markdown / HTML / 代码的字号等，和书分开存 */
+    var docReading by mutableStateOf(docReadingStore.load())
+        private set
+    var docReadingPreview by mutableStateOf<ReadingPrefs?>(null)
+        private set
+    val liveDocReading: ReadingPrefs get() = docReadingPreview ?: docReading
+    fun previewDocReading(value: ReadingPrefs?) { docReadingPreview = value?.normalized() }
+    fun updateDocReading(value: ReadingPrefs) {
+        docReading = value.normalized()
+        docReadingPreview = null
+        docReadingStore.save(docReading)
     }
 
     fun selectTheme(t: ReaderTheme) { theme = t; themeStore.save(t) }
@@ -475,6 +501,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         goToChapter(index, fragment)
         return true
     }
+
+    fun openSettings() { if (screen == Screen.Shelf) screen = Screen.Settings }
+    fun closeSettings() { if (screen == Screen.Settings) screen = Screen.Shelf }
 
     fun backToShelf() {
         editorSession?.close()

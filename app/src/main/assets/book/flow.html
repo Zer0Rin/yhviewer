@@ -245,7 +245,8 @@
       if (first.i > 0 && y < h) return add(first.i - 1, true);
     }
 
-    function relayout() {
+    // 记下视口顶部在读的位置（章节 + 元素 + 比例），排版变化后按它恢复
+    function capture() {
       var c = ready ? current() : null;
       var anchor = null, active = c && find(c.i), d = active && doc(active);
       if (d && d.elementFromPoint) {
@@ -256,29 +257,90 @@
           if (rect.height > 0) anchor = { el: el, fraction: (offset - rect.top) / rect.height };
         }
       }
-      secs.forEach(applyLive);
+      return { c: c, anchor: anchor };
+    }
+
+    function restore(state) {
       fit(secs, true);
       updateContinuation();
-      if (c) {
-        var s = find(c.i);
-        if (s) {
-          var offset = c.fraction * s.el.offsetHeight;
-          if (anchor && anchor.el.isConnected) {
-            var rect = anchor.el.getBoundingClientRect();
-            offset = rect.top + anchor.fraction * rect.height;
-          }
-          window.scrollTo(0, top(s) + offset);
-        }
+      var c = state && state.c;
+      if (!c) return;
+      var s = find(c.i);
+      if (!s) return;
+      var offset = c.fraction * s.el.offsetHeight;
+      var anchor = state.anchor;
+      if (anchor && anchor.el.isConnected) {
+        var rect = anchor.el.getBoundingClientRect();
+        offset = rect.top + anchor.fraction * rect.height;
       }
+      window.scrollTo(0, top(s) + offset);
+    }
+
+    function relayout() {
+      var state = capture();
+      secs.forEach(applyLive);
+      restore(state);
+    }
+
+    // v14：切主题、拖字号时先同步写样式（各章颜色在同一帧里变），隔一帧再量高度、恢复位置。
+    // 以前每次调用都立刻把所有章节压到 0 重新量，切主题时这一帧要等整套排版算完才画出来，
+    // 主题和字号同时变还会算两遍。连续多次调用只量一次，位置按第一次调用前的状态恢复。
+    var pendingState = null;
+    function restyle(apply) {
+      var first = pendingState === null;
+      if (first) pendingState = capture();
+      apply();
+      secs.forEach(applyLive);
+      if (!first) return;
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var state = pendingState;
+          pendingState = null;
+          restore(state);
+        });
+      });
     }
 
     window.setTheme = function (t) {
-      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) < 0) return;
-      theme = t;
-      document.documentElement.setAttribute('data-theme', t);
-      relayout();
+      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) < 0 || t === theme) return;
+      restyle(function () {
+        theme = t;
+        document.documentElement.setAttribute('data-theme', t);
+      });
     };
-    window.setReading = function (css) { reading = String(css); relayout(); };
+    window.setReading = function (css) {
+      css = String(css);
+      if (css === reading) return;
+      restyle(function () { reading = css; });
+    };
+
+    // v13：液态玻璃。原生控件（底部胶囊、拖动中的滑杆）在这些位置，页面把它们下面的内容模糊掉（见 Glass.kt）
+    window.yhGlass = function (rects) {
+      var host = document.getElementById('yh-glass');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'yh-glass';
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483647';
+        document.documentElement.appendChild(host);
+      }
+      rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      while (host.children.length < rects.length) {
+        var d = document.createElement('div');
+        d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .16s;' +
+          'background:color-mix(in srgb, var(--bg) 14%, transparent);' +
+          '-webkit-backdrop-filter:blur(16px) saturate(1.5);backdrop-filter:blur(16px) saturate(1.5)';
+        host.appendChild(d);
+      }
+      for (var i = 0; i < host.children.length; i++) {
+        var el = host.children[i], r = rects[i];
+        if (!r) { el.style.opacity = '0'; continue; }
+        el.style.left = (+r.x || 0) + 'px'; el.style.top = (+r.y || 0) + 'px';
+        el.style.width = Math.max(0, +r.w || 0) + 'px'; el.style.height = Math.max(0, +r.h || 0) + 'px';
+        el.style.borderRadius = Math.max(0, +r.r || 0) + 'px';
+        el.style.opacity = '1';
+      }
+    };
 
     window.YH = {
       state: function () {

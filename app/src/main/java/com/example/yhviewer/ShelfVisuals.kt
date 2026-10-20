@@ -129,8 +129,24 @@ fun Modifier.pressScale(interactionSource: MutableInteractionSource, pressed: Fl
  * 用于多选操作栏和阅读页的章节栏。
  */
 @Composable
-fun FloatingCapsule(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+fun FloatingCapsule(
+    modifier: Modifier = Modifier,
+    /** v13：不为 null 时做成液态玻璃，并把位置登记给页面做背景模糊（见 Glass.kt） */
+    glassKey: String? = null,
+    glassVisible: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
     val yh = LocalYH.current
+    val surface = if (glassKey != null) {
+        Modifier
+            .glassRegion(glassKey, visible = glassVisible)
+            .liquidGlass(PillShape, blurBehind = LocalGlassHost.current?.supported == true)
+    } else {
+        Modifier
+            .shadow(elevation = 12.dp, shape = PillShape, ambientColor = yh.shadow, spotColor = yh.shadow)
+            .background(yh.surface, PillShape)
+            .border(1.dp, yh.lineSoft, PillShape)
+    }
     Box(
         modifier
             .fillMaxWidth()
@@ -141,9 +157,7 @@ fun FloatingCapsule(modifier: Modifier = Modifier, content: @Composable RowScope
         Row(
             Modifier
                 .fillMaxWidth()
-                .shadow(elevation = 12.dp, shape = PillShape, ambientColor = yh.shadow, spotColor = yh.shadow)
-                .background(yh.surface, PillShape)
-                .border(1.dp, yh.lineSoft, PillShape)
+                .then(surface)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             content = content,

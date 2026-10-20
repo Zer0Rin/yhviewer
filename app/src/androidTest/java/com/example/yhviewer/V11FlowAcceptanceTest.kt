@@ -1,10 +1,15 @@
 package com.example.yhviewer
 
 import android.content.Intent
+import android.content.res.Resources
+import android.graphics.Color
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.webkit.WebView
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -163,7 +168,194 @@ class V11FlowAcceptanceTest {
     }
     private fun persisted(id: Long) = runBlocking { Locator.decode(checkNotNull(db.bookDao().get(id)).locator) }
 
+    private fun captureV14(name: String, s: ActivityScenario<MainActivity>, waitForIdle: Boolean = true) {
+        var badge: TextView? = null
+        s.onActivity { activity ->
+            val density = activity.resources.displayMetrics.density
+            badge = TextView(activity).apply {
+                text = "Android WebView ${WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"}"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(0x99000000.toInt())
+                setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+                elevation = 20 * density
+            }
+            (activity.window.decorView as FrameLayout).addView(
+                badge,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = (8 * density).toInt() },
+            )
+        }
+        if (waitForIdle) {
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(200)
+        }
+        exportV7Screenshot(name)
+        s.onActivity { activity -> (activity.window.decorView as FrameLayout).removeView(badge) }
+    }
+
     @Test fun continuousIsTheDefault() { assertTrue(ReadingPrefs().continuous) }
+
+    @Test fun v16SettingsScreenShowsFlavorPrivacyWithoutLicenseSectionAndReturnsToShelf() {
+        launch().use { s ->
+            compose.onNodeWithContentDescription("设置").performClick()
+            waitText("隐私与安全")
+            compose.onNodeWithText(AboutInfo.versionLine(BuildConfig.VERSION_NAME, BuildConfig.FLAVOR)).assertIsDisplayed()
+            compose.onNodeWithText("作者").assertIsDisplayed()
+            compose.onNodeWithText("项目主页").assertIsDisplayed()
+            compose.onNodeWithText("开源许可").assertDoesNotExist()
+            exportV7Screenshot("v16-settings-${BuildConfig.FLAVOR}.png")
+            compose.onNodeWithText("Pyodide").assertDoesNotExist()
+            compose.onNodeWithText("CPython").assertDoesNotExist()
+            Espresso.pressBack()
+            waitText("书架")
+        }
+    }
+
+    @Test fun v16BookGlassTopbarAlignsWithPageAndAaHasNoChapterProgress() {
+        val id = runBlocking { fixtures.import(fixtures.epub(count = 20)) }
+        launch().use { s ->
+            open(s, id)
+            compose.onNodeWithText("Aa").performClick()
+            compose.onNodeWithText("进度").assertDoesNotExist()
+            compose.onNodeWithContentDescription("章节进度").assertDoesNotExist()
+            Espresso.pressBack()
+
+            fun assertGlassMatches(themeLabel: String, screenshot: String) {
+                compose.onNodeWithText("Aa").performClick()
+                compose.onNodeWithText(themeLabel).performClick()
+                Espresso.pressBack()
+                compose.waitForIdle()
+                SystemClock.sleep(500)
+                assertEquals("Glass overlay should contain bottom and top regions ($themeLabel)", "2", js(s, "document.querySelectorAll('#yh-glass > div').length"))
+                val rects = JSONArray(JSONTokener(js(s, "JSON.stringify([...document.querySelectorAll('#yh-glass > div')].map(e=>[parseFloat(e.style.top),parseFloat(e.style.height),parseFloat(e.style.borderRadius),parseFloat(getComputedStyle(e).opacity)]))")).nextValue().toString())
+                val topBarRect = rects.getJSONArray(1)
+                val bounds = compose.onNodeWithTag("book-top-bar-glass", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+                val wv = view(s)
+                var viewTop = 0
+                var scale = 1f
+                s.onActivity {
+                    val location = IntArray(2)
+                    wv.getLocationOnScreen(location)
+                    viewTop = location[1]
+                    @Suppress("DEPRECATION")
+                    run { scale = wv.scale }
+                }
+                val cssScreenTop = topBarRect.getDouble(0) * scale + viewTop
+                assertEquals("Top glass should align with native top bar ($themeLabel)", bounds.top.toDouble(), cssScreenTop, (2f * scale).toDouble())
+                assertEquals("Top glass should start at screen top ($themeLabel)", 0.0, cssScreenTop, (2f * scale).toDouble())
+                assertEquals("Top glass corners should be square ($themeLabel)", 0.0, topBarRect.getDouble(2), .1)
+                assertEquals("Bottom capsule glass should also be present ($themeLabel)", 1.0, rects.getJSONArray(0).getDouble(3), .01)
+                exportV7Screenshot(screenshot)
+            }
+
+            assertGlassMatches("纸张（浅）", "v16-reader-glass-paper.png")
+            assertGlassMatches("墨色（深）", "v16-reader-glass-ink.png")
+
+            val wv = view(s)
+            var scale = 1f
+            s.onActivity {
+                @Suppress("DEPRECATION")
+                run { scale = wv.scale }
+            }
+            tapRenderedWebViewPoint(instrumentation, wv, wv.width / (2f * scale), wv.height / (2f * scale))
+            compose.waitForIdle()
+            SystemClock.sleep(700)
+            val opacity = js(s, "JSON.stringify([...document.querySelectorAll('#yh-glass > div')].map(e=>parseFloat(getComputedStyle(e).opacity)))")
+            assertFalse("Glass regions should fade with the hidden toolbars; opacity=$opacity", compose.onAllNodesWithTag("book-top-bar-glass", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+            assertTrue("Glass regions should become transparent with the hidden toolbars; opacity=$opacity", opacity.contains("0"))
+        }
+    }
+
+    @Test fun tallEpubAaSheetStaysBelowStatusBarInContinuousMode() = verifyTallEpubAaSheet(true)
+
+    @Test fun tallEpubAaSheetStaysBelowStatusBarInSinglePageMode() = verifyTallEpubAaSheet(false)
+
+    private fun verifyTallEpubAaSheet(continuous: Boolean) {
+        val id = runBlocking { fixtures.import(fixtures.epub(count = 1415)) }
+        ReadingPrefsStore(context).save(ReadingPrefs(continuous = continuous))
+        launch().use { s ->
+            if (continuous) open(s, id) else {
+                model(s) { it.openBook(id) }
+                compose.waitUntil(25_000) {
+                    var ready = false
+                    model(s) { ready = (it.reader as? ReaderState.Ready)?.doc?.bookId == id }
+                    ready && url(s) != null
+                }
+                compose.waitForIdle()
+            }
+            compose.onNodeWithText("Aa").performClick()
+            compose.waitForIdle()
+            SystemClock.sleep(500)
+            val mode = if (continuous) "continuous" else "single"
+            val first = compose.onNodeWithTag("reader-aa-sheet-handle", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.top
+            exportV7Screenshot("v15-tall-epub-$mode-500ms.png")
+            SystemClock.sleep(1_500)
+            val handle = compose.onNodeWithTag("reader-aa-sheet-handle", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+            assertEquals("Aa sheet top should stay fixed after opening (continuous=$continuous)", first, handle.top, 1f)
+            val statusBarHeight = Resources.getSystem().getDimensionPixelSize(
+                Resources.getSystem().getIdentifier("status_bar_height", "dimen", "android"),
+            )
+            val minTop = statusBarHeight + 56f * context.resources.displayMetrics.density
+            assertTrue("Aa sheet should remain below status bar plus 56dp (continuous=$continuous): ${handle.top} < $minTop", handle.top >= minTop - 1f)
+            exportV7Screenshot("v15-tall-epub-$mode-2000ms.png")
+            compose.onNodeWithText("阅读时屏幕常亮").performScrollTo().assertIsDisplayed()
+            exportV7Screenshot("v15-tall-epub-$mode-bottom.png")
+        }
+    }
+
+    @Test fun v14ThemeUpdatesAllFramesSynchronouslyAndGlassStatesCanBeCaptured() {
+        val id = runBlocking { fixtures.import(fixtures.txt()) }
+        runBlocking { repo.savePosition(id, Locator(5, .4f), 12) }
+        launch().use { s ->
+            open(s, id)
+            val original = view(s)
+            val before = state(s)
+            captureV14("v14-paper-capsule-webview.png", s)
+            js(s, """
+                window.__v14ThemeSync=null; window.__v14ThemeAfterTwoFrames=null;
+                const setTheme=window.setTheme;
+                window.setTheme=function(t){
+                  setTheme(t);
+                  window.__v14ThemeSync={outer:document.documentElement.dataset.theme,
+                    frames:[...document.querySelectorAll('iframe')].map(f=>f.contentDocument?.documentElement?.dataset?.theme||null)};
+                  requestAnimationFrame(()=>requestAnimationFrame(()=>window.__v14ThemeAfterTwoFrames=YH.state()));
+                };
+            """.trimIndent())
+            model(s) { it.selectTheme(ReaderTheme.INK) }
+            compose.waitUntil(10_000) { js(s, "window.__v14ThemeSync!==null") == "true" }
+            val sameFrame = JSONObject(string(s, "JSON.stringify(window.__v14ThemeSync)"))
+            assertEquals("ink", sameFrame.getString("outer"))
+            val frameThemes = sameFrame.getJSONArray("frames")
+            assertTrue("At least one chapter iframe should be mounted", frameThemes.length() >= 1)
+            repeat(frameThemes.length()) { assertEquals("ink", frameThemes.getString(it)) }
+            assertSame("Theme change must retain the existing WebView", original, view(s))
+            compose.waitUntil(10_000) { js(s, "window.__v14ThemeAfterTwoFrames!==null") == "true" }
+            val restored = string(s, "window.__v14ThemeAfterTwoFrames").split(',')
+            assertEquals(before.first, restored[0].toInt())
+            assertEquals(before.second, restored[1].toFloat(), .04f)
+
+            captureV14("v14-ink-capsule-webview.png", s)
+            model(s) { it.selectTheme(ReaderTheme.TERMINAL) }
+            compose.waitUntil(10_000) { js(s, "document.documentElement.dataset.theme==='terminal'") == "true" }
+            captureV14("v14-terminal-highlight-webview.png", s)
+
+            compose.onNodeWithText("Aa").performClick()
+            compose.waitForIdle()
+            captureV14("v14-settings-sheet-webview.png", s)
+            val slider = compose.onNodeWithContentDescription("字号")
+            slider.performTouchInput {
+                down(center)
+                moveTo(centerRight, 500)
+            }
+            compose.waitForIdle()
+            captureV14("v14-glass-slider-transparent-sheet-webview.png", s)
+            slider.performTouchInput { up() }
+            compose.waitForIdle()
+            androidx.test.espresso.Espresso.pressBack()
+        }
+    }
+
     @Test fun idleFlowPollingAllowsAutomaticDebouncedPositionSave() {
         val id = runBlocking { fixtures.import(fixtures.txt()) }
         runBlocking { repo.savePosition(id, Locator(5, .4f), 12) }

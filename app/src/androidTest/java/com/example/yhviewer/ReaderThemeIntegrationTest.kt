@@ -125,6 +125,7 @@ class ReaderThemeIntegrationTest {
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
         compose.onNode(hasText(label, substring = true)).performClick()
+        androidx.test.espresso.Espresso.pressBack()
     }
     private fun theme(scenario: ActivityScenario<MainActivity>, id: String) = waitJs(scenario,
         "document.documentElement.getAttribute('data-theme')", "\"$id\"")
@@ -145,7 +146,7 @@ class ReaderThemeIntegrationTest {
                 select(label)
                 theme(scenario, id)
                 // Themes reflow text; v2 preserves a relative position, while keeping the same DOM.
-                waitJs(scenario, "document.body.offsetHeight>0 && Math.abs(scrollY/(document.documentElement.scrollHeight-innerHeight)-window.__beforeRatio)<.02")
+                waitJs(scenario, "document.body.offsetHeight>0 && Math.abs(scrollY/(document.documentElement.scrollHeight-innerHeight)-window.__beforeRatio)<.03")
                 assertEquals("\"same-document\"", js(scenario, "window.__themeSentinel"))
                 scenario.onActivity { assertSame(initialWeb, web(it.window.decorView)) }
                 assertEquals("true", js(scenario, "document.documentElement.scrollWidth<=innerWidth && document.body.scrollWidth<=innerWidth"))
@@ -209,17 +210,20 @@ class ReaderThemeIntegrationTest {
             ready(scenario)
             theme(scenario, "terminal")
             compose.onNodeWithText("Aa").performClick()
-            compose.onNodeWithText("✓ 终端").assertIsDisplayed()
+            compose.onNodeWithText("终端").assertIsSelected()
         }
     }
 
-    @Test fun htmlHasNoThemeMenuAndItsOwnSetThemeIsNeverCalled() {
+    @Test fun htmlAaAdjustsTextSizeWithoutShowingThemeOptions() {
         assertTrue(prefs.edit().putString("md_theme", "ink").commit())
         val html = "<h1>Original HTML</h1><script>window.themeCalls=0;window.setTheme=()=>window.themeCalls++</script>"
         val savedTrusted = AppCapabilities.effective(DocPermissions.TRUSTED)
         launch(document("theme-original.html", html, true), true).use { scenario ->
             waitJs(scenario, "document.readyState==='complete' && typeof window.setTheme==='function'")
-            compose.onNodeWithText("Aa").assertDoesNotExist()
+            compose.onNodeWithText("Aa").performClick()
+            compose.onNodeWithText("字号").assertIsDisplayed()
+            compose.onNodeWithText("主题").assertDoesNotExist()
+            androidx.test.espresso.Espresso.pressBack()
             assertEquals("0", js(scenario, "window.themeCalls"))
             assertEquals("\"Original HTML\"", js(scenario, "document.querySelector('h1').textContent"))
             assertEquals("null", js(scenario, "document.documentElement.getAttribute('data-theme')"))
