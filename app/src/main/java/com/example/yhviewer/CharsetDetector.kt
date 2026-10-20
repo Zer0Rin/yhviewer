@@ -1,6 +1,7 @@
 package com.example.yhviewer
 
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
@@ -41,13 +42,35 @@ object CharsetDetector {
         return Result(String(bytes, Charsets.UTF_8), Charsets.UTF_8)
     }
 
+    internal fun strictUtf8(bytes: ByteArray): String? = strictDecode(bytes, Charsets.UTF_8)
+
     private fun strictDecode(bytes: ByteArray, cs: Charset): String? = try {
-        cs.newDecoder()
+        val decoder = cs.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes))
-            .toString()
-    } catch (e: CharacterCodingException) {
+        val input = ByteBuffer.wrap(bytes)
+        val output = CharBuffer.allocate(8192)
+        while (true) {
+            val result = decoder.decode(input, output, true)
+            result.throwIfError()
+            if (result.isUnderflow) break
+            output.clear()
+        }
+        output.clear()
+        while (true) {
+            val result = decoder.flush(output)
+            result.throwIfError()
+            if (result.isUnderflow) break
+            output.clear()
+        }
+        // The platform String decoder can allocate the result directly. Keeping a
+        // whole-source CharBuffer alive while copying to String doubled the peak.
+        String(bytes, cs)
+    } catch (_: CharacterCodingException) {
         null
+    }
+
+    private fun java.nio.charset.CoderResult.throwIfError() {
+        if (isError) throwException()
     }
 }

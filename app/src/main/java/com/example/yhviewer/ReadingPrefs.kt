@@ -26,6 +26,8 @@ data class ReadingPrefs(
     val font: ReadingFont = ReadingFont.THEME,
     val tapToTurn: Boolean = true,   // 点屏幕左右两侧翻页
     val keepScreenOn: Boolean = false,
+    /** v11：章节之间上下滑动无缝连接；关掉则一章一页（滑到底再翻页换章） */
+    val continuous: Boolean = true,
 ) {
     /** 夹到合法范围：偏好文件被改坏、或以后调整范围时，不会出现 0 号字之类的值 */
     fun normalized() = copy(
@@ -65,6 +67,7 @@ class ReadingPrefsStore(context: Context) {
         font = ReadingFont.fromId(prefs.getString("read_font", null)),
         tapToTurn = prefs.getBoolean("read_tap_turn", true),
         keepScreenOn = prefs.getBoolean("read_keep_on", false),
+        continuous = prefs.getBoolean("read_continuous", true),
     ).normalized()
 
     fun save(value: ReadingPrefs) {
@@ -76,6 +79,7 @@ class ReadingPrefsStore(context: Context) {
             .putString("read_font", p.font.id)
             .putBoolean("read_tap_turn", p.tapToTurn)
             .putBoolean("read_keep_on", p.keepScreenOn)
+            .putBoolean("read_continuous", p.continuous)
             .apply()
     }
 }

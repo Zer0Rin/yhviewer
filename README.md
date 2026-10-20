@@ -9,6 +9,8 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
+**v0.8.0** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters, live reading layout controls and a draggable TOC fast scroller. Aa retains the single-chapter option. Large-TXT heading matching uses bounded line windows while preserving legacy chapter semantics. See [release notes](docs/releases/v0.8.0.md), [verification](docs/verification/V08_VERIFICATION.md) and [v0.8.0 downloads](https://github.com/Zer0Rin/yhviewer/releases/tag/v0.8.0).
+
 **v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
@@ -24,6 +26,10 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 | Folder import report | Whole-book search |
 |---|---|
 | ![](docs/screenshots/v07-import-report.png) | ![](docs/screenshots/v07-book-search.png) |
+
+| Continuous boundary | Filtered TOC while dragging |
+|---|---|
+| ![](docs/screenshots/v08-continuous-boundary.png) | ![](docs/screenshots/v08-toc-fast-scroll.png) |
 
 **[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.7 verification](docs/verification/V07_VERIFICATION.md), [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
@@ -48,7 +54,7 @@ YHViewer treats every file as **untrusted content**, renders it in a locked-down
 | **Python execution (Standard)** | Bundled offline Pyodide / CPython standard library, separate startup and execution deadlines, Unicode output and user-code error lines; no external network or package downloads |
 | **Code editing** | Offline CodeMirror 6 for code, plain text, Markdown and HTML up to 1,000,000 characters; syntax highlighting, search, undo/redo and a keyboard symbol bar. Run unsaved JS or Python snapshots |
 | **Code** | File-type detection, line numbers excluded from copied text, wrap toggle and bundled syntax highlighting. Compact JSON up to 500,000 characters is formatted; large files skip highlighting and render in 200-line chunks |
-| **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents |
+| **TXT** | Encoding auto-detected (UTF-8 / GBK / Big5), chapters split by headings like `第X章` / `Chapter N`, table of contents; v0.8 adds a persistent byte index and lazy chapter reads |
 | **EPUB** | EPUB 2 and 3, title and TOC from nav / NCX, images and publisher CSS, book scripts never run |
 
 Reading and library features:
@@ -59,7 +65,7 @@ Reading and library features:
 - **Additional formats**: Markdown footnotes, SVG image/source switching, and LOG classification as plain text. Detected vertical EPUBs are normalized to horizontal reading with an explanatory notice.
 - **HTML dialogs**: alert/confirm/prompt use document-attributed native dialogs; repeated prompts may be blocked for the current page.
 
-- **Reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Markdown, code and TXT switch in place; EPUB reloads with scripts disabled. Position is preserved approximately and code colors follow the theme. HTML retains its original appearance and has no theme menu.
+- **Reading themes**: Paper (light), Ink (dark), Terminal (monospace) and Auto (follows the system). Markdown, code and TXT switch in place. The v0.8 continuous EPUB reader updates its existing view; the single-chapter reader reloads with book scripts disabled. Position is preserved approximately and code colors follow the theme. HTML retains its original appearance and has no theme menu.
 - **Book reading controls**: TXT and EPUB support immersive reading, confirmed left/right taps to move 90% of the viewport, chapter navigation, font size, line height, margins, font selection and keep-awake. Settings persist; EPUB scripts remain disabled.
 - **Reading position**: saved per document as chapter + scroll ratio, restored after theme changes, rotation and app restarts. Saves are debounced and flushed on backgrounding; an abrupt kill can lose the most recent unsaved movement. The shelf shows how far you've read.
 - **Save and Save as**: Save atomically updates only the private shelf copy; the source file is untouched. Reopening the original replaces that copy, so use Save as to retain edits in a new file. Save as also imports the new file into the shelf.
@@ -81,7 +87,7 @@ Defense in depth: complementary restrictions limit device access, resource loadi
 | # | Layer | Mechanism | Blocks |
 |---|---|---|---|
 | 1 | OS permission | **Strict** has no `INTERNET`; **Standard** has it but blocks requests by default. CI and releases inspect both final APKs | Accidental flavor misconfiguration |
-| 2 | WebView settings | No `file://` / `content://` access, no JS bridge, no auto popups, no cookies. EPUB JavaScript is always off | Reading device files, calling into Kotlin |
+| 2 | WebView settings | No `file://` / `content://` access, no JS bridge, no auto popups, no cookies. Book scripts are disabled; the continuous reader uses a trusted layout shell | Reading device files, calling into Kotlin |
 | 3 | Request interception | Current private origin and explicitly permitted HTTPS hosts only; unknown private paths return 403 | Unapproved resource hosts |
 | 4 | Content-Security-Policy | Response header on local documents; permissions select resource types. Default `connect-src 'none'`, `frame-src 'none'`; EPUB `script-src 'none'` | Unapproved scripts, connections and frames in the current document |
 

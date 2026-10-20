@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class ReaderThemeIntegrationTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
@@ -43,12 +44,14 @@ class ReaderThemeIntegrationTest {
         android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().use { reader -> reader.readText() }
     }
     @Before fun prepare() {
+        legacyChapterMode = LegacyChapterMode(context)
         originalTheme = prefs.getString("md_theme", null)
         originalNight = shell("cmd uimode night").substringAfter(':').trim()
         assertTrue(prefs.edit().putString("md_theme", "auto").commit())
         shell("cmd uimode night no")
     }
     @After fun restore() {
+        legacyChapterMode.restore()
         runBlocking {
             val repo = ShelfRepository(context, AppDatabase.get(context))
             created.forEach { uri ->

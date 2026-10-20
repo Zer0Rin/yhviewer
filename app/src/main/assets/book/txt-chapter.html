@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh" data-theme="/*THEME*/">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>/*TITLE*/</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
+  <!--
+    v11 连续滚动：TXT 的一章，放在 flow.html 的沙箱 iframe 里（无脚本）。
+    样式和 txt.html 保持一致；#yh-reading 由外层页面实时替换（字号、行距等）。
+  -->
+  <style>
+    :where(:root) { --read-scale: 1; --read-line: 1.9; --read-margin: 20px; --read-font: var(--font-body); }
+    html { background: var(--bg); }
+    body {
+      margin: 0 auto; max-width: 720px;
+      padding: 24px var(--read-margin) 8px;
+      color: var(--fg); background: var(--bg);
+      font-family: var(--read-font);
+      font-size: calc(18px * var(--read-scale));
+      line-height: var(--read-line);
+      -webkit-text-size-adjust: 100%;
+      word-wrap: break-word; text-align: justify;
+    }
+    h1 { font-size: 1.25em; line-height: 1.4; color: var(--heading); margin: .4em 0 1.4em; text-align: left; }
+    p { margin: 0 0 .9em; text-indent: 2em; }
+    [data-theme="terminal"] body { font-size: calc(15px * var(--read-scale)); text-align: left; }
+  </style>
+  <style id="yh-reading">/*READING*/</style>
+</head>
+<body>
+  <h1>/*TITLE*/</h1>
+  <main>/*BODY*/</main>
+</body>
+</html>

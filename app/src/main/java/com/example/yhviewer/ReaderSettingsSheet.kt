@@ -130,6 +130,7 @@ fun ReaderSettingsSheet(
                 }
             }
 
+            SwitchRow("章节连续滚动", reading.continuous) { onReading(reading.copy(continuous = it)) }
             SwitchRow("点击屏幕左右两侧翻页", reading.tapToTurn) { onReading(reading.copy(tapToTurn = it)) }
             SwitchRow("阅读时屏幕常亮", reading.keepScreenOn) { onReading(reading.copy(keepScreenOn = it)) }
         }
@@ -156,6 +157,7 @@ private fun ChipRow(content: @Composable () -> Unit) {
 private fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange,
+            modifier = Modifier.semantics { contentDescription = title })
     }
 }

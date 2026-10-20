@@ -30,10 +30,16 @@ public class V10FixtureProvider extends DocumentsProvider {
         File f = new File(getContext().getFilesDir(), "v10-fixtures"); f.mkdirs(); return f;
     }
     @Override public boolean onCreate() {
-        for (String name : new String[]{"generic", "external"}) getContext().grantUriPermission(
-            "io.github.zer0rin.yhviewer", DocumentsContract.buildTreeDocumentUri(AUTHORITY, name + ":"),
-            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        grantFixtureTrees();
         return true;
+    }
+    private void grantFixtureTrees() {
+        long identity = android.os.Binder.clearCallingIdentity();
+        try {
+            for (String name : new String[]{"generic", "external"}) getContext().grantUriPermission(
+                "io.github.zer0rin.yhviewer", DocumentsContract.buildTreeDocumentUri(AUTHORITY, name + ":"),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        } finally { android.os.Binder.restoreCallingIdentity(identity); }
     }
     private File file(String id) {
         int colon = id.indexOf(':'); if (colon < 0) throw new IllegalArgumentException(id);
@@ -56,6 +62,8 @@ public class V10FixtureProvider extends DocumentsProvider {
     private String repeated(String text) { StringBuilder out = new StringBuilder(); for (int i=0;i<60;i++) out.append(text); return out.toString(); }
     @Override public Bundle call(String method, String arg, Bundle extras) {
         if ("fixtureReset".equals(method)) {
+            // Target reinstall revokes temporary grants even if this provider stays alive.
+            grantFixtureTrees();
             erase(root("generic")); root("generic").mkdirs();
             put("page.html", "<html><head><link rel=stylesheet href='assets/layout.css'></head><body><h1>Fixture page</h1><img src='assets/card.svg'><a href='other.html#second'>Next document</a><button onclick=\"alert('fixture alert')\">Alert</button><p>needle one needle two END-HTML</p></body></html>");
             put("other.html", "<h1>Other document</h1><h2 id=second>Second heading</h2><p>SECOND-END</p>");

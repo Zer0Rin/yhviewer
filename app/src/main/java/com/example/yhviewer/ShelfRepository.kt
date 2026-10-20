@@ -39,9 +39,11 @@ sealed interface OpenedDoc {
         override val bookId: Long,
         override val name: String,
         override val locator: Locator,
-        val chapters: List<TxtChapter>,
+        /** v11：章节按需读取（见 TxtBook.kt），打开时只读索引 */
+        val book: TxtBook,
     ) : OpenedDoc {
-        override val chapterCount get() = chapters.size
+        override val chapterCount get() = book.size
+        val titles: List<String> get() = book.titles
     }
 
     data class Epub(
@@ -76,6 +78,8 @@ class ShelfRepository(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val tmpDir: File = context.cacheDir,
     val covers: CoverStore = CoverStore(File(context.filesDir, "covers")),
+    /** v11：TXT 章节索引，文件名 = 副本文件名 + ".idx" */
+    private val txtIndexDir: File = File(context.filesDir, "txt-index"),
 ) {
     private val dao = db.bookDao()
     private val groupDao = db.groupDao()
@@ -222,14 +226,30 @@ class ShelfRepository(
     private suspend fun importText(uri: Uri, source: DocumentLoader.Source): Long {
         val max = if (source.type == DocType.TXT) DocumentLoader.MAX_TXT_BYTES else DocumentLoader.MAX_TEXT_BYTES
         // 编码识别只在导入时做一次，副本统一存成 UTF-8，之后打开不用再猜
+        fun phase(name: String) {
+            if (source.type == DocType.TXT && BuildConfig.DEBUG) android.util.Log.i("TxtImport", name)
+        }
+        phase("decode-start")
         val text = DocumentLoader.readText(context, uri, max)
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        val kind = ContentClassifier.classify(source.name, source.type, bytes.size.toLong(), text)
+        phase("decode-done chars=${text.length}")
         val fileName = UUID.randomUUID().toString()
         val target = File(dir, fileName)
         try {
-            withContext(Dispatchers.IO) { writeAtomically(target, bytes) }
-            val id = commit(uri.toString(), source.name, source.type, fileName, bytes.size.toLong(), kind, BookTitles.parse(source.name).author)
+            val size = withContext(Dispatchers.IO) {
+                if (source.type == DocType.TXT) {
+                    phase("copy-start")
+                    writeTextAtomically(target, text)
+                    phase("copy-done bytes=${target.length()}")
+                    phase("index-start")
+                    val indexed = runCatching { TxtBook.build(target, text, txtIndexFile(fileName)) }
+                    phase("index-done success=${indexed.isSuccess}")
+                } else {
+                    writeAtomically(target, text.toByteArray(Charsets.UTF_8))
+                }
+                target.length()
+            }
+            val kind = ContentClassifier.classify(source.name, source.type, size, text)
+            val id = commit(uri.toString(), source.name, source.type, fileName, size, kind, BookTitles.parse(source.name).author)
             withContext(NonCancellable + Dispatchers.IO) { runCatching { covers.delete(id) } }
             return id
         } catch (e: Exception) {
@@ -416,7 +436,7 @@ class ShelfRepository(
                 DocType.EPUB -> EpubParser.parse(local).let { parsed ->
                     OpenedDoc.Epub(book.id, book.name, locator, local, parsed.chapters, parsed.vertical)
                 }
-                DocType.TXT -> OpenedDoc.Txt(book.id, book.name, locator, TxtChapters.split(local.readText(Charsets.UTF_8)))
+                DocType.TXT -> OpenedDoc.Txt(book.id, book.name, locator, TxtBook.open(local, txtIndexFile(book.localFile)))
                 else -> OpenedDoc.Single(
                     book.id, book.name, locator, LoadedDoc(book.name, book.type, local.readText(Charsets.UTF_8)), DocPermissions.fromBits(book.permissions),
                     bundle = book.localFile.takeIf(BundlePaths::isBundle)?.let {
@@ -493,6 +513,9 @@ class ShelfRepository(
         withContext(NonCancellable + Dispatchers.IO) {
             BundleStorage.removeUnreferenced(dir, book.localFile, dao.allLocalFiles())
             covers.delete(id)
+            if (!BundlePaths.isBundle(book.localFile) && book.localFile !in dao.allLocalFiles()) {
+                runCatching { txtIndexFile(book.localFile).delete() }
+            }
         }
     }
 
@@ -519,7 +542,9 @@ class ShelfRepository(
 
     /** 每章纯文本：TXT 直接取章节文本；EPUB 读章节 XHTML 去标签。单章读失败当作空章 */
     suspend fun chapterTexts(doc: OpenedDoc): List<String> = when (doc) {
-        is OpenedDoc.Txt -> doc.chapters.map { TxtSearchText.rendered(it.title, it.text) }
+        is OpenedDoc.Txt -> withContext(Dispatchers.IO) {
+            doc.book.allTexts().mapIndexed { i, text -> TxtSearchText.rendered(doc.titles[i], text) }
+        }
         is OpenedDoc.Epub -> withContext(Dispatchers.IO) {
             doc.chapters.map { ch ->
                 currentCoroutineContext().ensureActive()
@@ -542,10 +567,33 @@ class ShelfRepository(
         val ids = dao.allIds().toSet()
         runCatching { bookmarkDao.deleteOrphans() }
         withContext(Dispatchers.IO) {
+            // v11：索引文件跟着副本走，副本不在了就删
+            runCatching { txtIndexDir.listFiles() }.getOrNull().orEmpty()
+                .filter { it.name.endsWith(".tmp") || it.name.removeSuffix(".idx") !in referenced }
+                .forEach { runCatching { it.delete() } }
             dir.listFiles().orEmpty()
                 .filter { it.name !in referenced }
                 .count { it.deleteRecursively() } + covers.cleanOrphans(ids)
         }
+    }
+
+    private fun txtIndexFile(localFile: String) = File(txtIndexDir, "$localFile.idx")
+
+    /** Bound encoder scratch space too: Writer.write(String) may copy the whole argument. */
+    private fun writeTextAtomically(target: File, text: String) {
+        target.parentFile?.mkdirs()
+        val tmp = File(target.path + ".tmp")
+        try {
+            tmp.outputStream().bufferedWriter(Charsets.UTF_8).use { out ->
+                var offset = 0
+                while (offset < text.length) {
+                    val count = minOf(8192, text.length - offset)
+                    out.write(text, offset, count)
+                    offset += count
+                }
+            }
+            if (!tmp.renameTo(target)) throw IOException("无法保存本地副本")
+        } finally { tmp.delete() }
     }
 
     /** 先写临时文件再 rename：写到一半崩溃也不会留下半截副本 */

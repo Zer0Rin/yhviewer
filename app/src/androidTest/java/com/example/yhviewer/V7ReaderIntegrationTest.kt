@@ -26,16 +26,19 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class V7ReaderIntegrationTest {
+    private lateinit var legacyChapterMode: LegacyChapterMode
     @get:Rule val compose = createEmptyComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private var created: Uri? = null
     private var originalTheme: String? = null
 
     @Before fun rememberPreferences() {
+        legacyChapterMode = LegacyChapterMode(context)
         originalTheme = context.getSharedPreferences("reader_prefs", 0).getString("md_theme", null)
     }
 
     @After fun cleanup() {
+        legacyChapterMode.restore()
         val edit = context.getSharedPreferences("reader_prefs", 0).edit()
         originalTheme?.let { edit.putString("md_theme", it) } ?: edit.remove("md_theme")
         assertTrue(edit.commit())

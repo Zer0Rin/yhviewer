@@ -178,11 +178,20 @@ fun ChapterDrawerContent(
                     color = yh.muted,
                 )
             }
+            val fast = entries.size >= FastScroll.MIN_ITEMS
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 items(entries, key = { it.index }) { e ->
-                    TocRow(e, isCurrent = e.index == current, isRead = e.index < current, onClick = { onPick(e.index) })
+                    TocRow(e, isCurrent = e.index == current, isRead = e.index < current, onClick = { onPick(e.index) }, endPadding = if (fast) 32.dp else 16.dp)
                 }
             }
+            // v11：章节多时右侧的快速滚动条，按住拖动直接跳
+            FastScroller(
+                state = listState,
+                count = entries.size,
+                title = { entries.getOrNull(it)?.title.orEmpty() },
+                number = { (entries.getOrNull(it)?.index ?: it) + 1 },
+                modifier = Modifier.matchParentSize(),
+            )
         }
 
         // ---------- 底部：上一章 / 下一章 ----------
@@ -202,7 +211,7 @@ fun ChapterDrawerContent(
 }
 
 @Composable
-private fun TocRow(e: TocEntry, isCurrent: Boolean, isRead: Boolean, onClick: () -> Unit) {
+private fun TocRow(e: TocEntry, isCurrent: Boolean, isRead: Boolean, onClick: () -> Unit, endPadding: androidx.compose.ui.unit.Dp = 16.dp) {
     val yh = LocalYH.current
     Row(
         Modifier
@@ -213,7 +222,7 @@ private fun TocRow(e: TocEntry, isCurrent: Boolean, isRead: Boolean, onClick: ()
                 if (isCurrent) drawRect(yh.accent, size = size.copy(width = 3.dp.toPx()))
             }
             .clickable(onClick = onClick)
-            .padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 20.dp, end = endPadding, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

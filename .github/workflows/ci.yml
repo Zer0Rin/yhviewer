@@ -33,7 +33,9 @@ jobs:
         with:
           cache-provider: basic
       - name: Unit tests, lint and debug APK
-        run: ./gradlew :app:testStrictDebugUnitTest :app:testStandardDebugUnitTest :app:lintStrictDebug :app:lintStandardDebug :app:assembleStrictDebug :app:assembleStandardDebug --continue --no-configuration-cache --stacktrace
+        run: |
+          ./gradlew :app:testStrictDebugUnitTest :app:testStandardDebugUnitTest :app:lintStrictDebug :app:lintStandardDebug :app:assembleStrictDebug :app:assembleStandardDebug --continue --no-configuration-cache --stacktrace
+          node scripts/test-flow-shell.cjs
       - name: Check final APK permissions
         run: |
           scripts/verify-apk-permissions.sh app/build/outputs/apk/strict/debug/app-strict-debug.apk strict

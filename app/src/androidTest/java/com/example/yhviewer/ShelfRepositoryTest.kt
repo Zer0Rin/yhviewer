@@ -11,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -43,7 +44,7 @@ class ShelfRepositoryTest {
         root = File(context.cacheDir, "shelf-test-${UUID.randomUUID()}")
         shelfDir = File(root, "shelf")
         srcDir = File(root, "src").apply { mkdirs() }
-        repo = ShelfRepository(context, db, dir = shelfDir, clock = { now }, tmpDir = File(root, "tmp").apply { mkdirs() }, covers = CoverStore(File(root, "covers")))
+        repo = ShelfRepository(context, db, dir = shelfDir, clock = { now }, tmpDir = File(root, "tmp").apply { mkdirs() }, covers = CoverStore(File(root, "covers")), txtIndexDir = File(root, "txt-index"))
     }
 
     @After
@@ -147,7 +148,16 @@ class ShelfRepositoryTest {
         assertEquals("副本应已转成 UTF-8", text, copy.readText(Charsets.UTF_8))
 
         val opened = repo.open(id) as OpenedDoc.Txt
-        assertEquals(listOf("第一章 夜车", "第二章 抵达"), opened.chapters.map { it.title })
+        assertEquals(listOf("第一章 夜车", "第二章 抵达"), opened.titles)
+    }
+
+    @Test fun txtStreamingCopyRetainsEncodingAndSurrogatesAcrossWriterChunks() = runBlocking<Unit> {
+        val raw = "x".repeat(8191) + "😀\r\n第一章\r正文\r\n第二章\r\n尾声"
+        val id = repo.import(source("chunk-boundary.txt", raw).second)
+        val row = db.bookDao().get(id)!!
+        assertArrayEquals(raw.toByteArray(Charsets.UTF_8), File(shelfDir, row.localFile).readBytes())
+        val doc = repo.open(id) as OpenedDoc.Txt
+        assertEquals(TxtChapters.split(raw), (0 until doc.book.size).map(doc.book::chapter))
     }
 
     @Test fun positionIsSavedAndRestored() = runBlocking<Unit> {
@@ -220,8 +230,15 @@ class ShelfRepositoryTest {
         val id = repo.import(source("keep.md", "x").second)
         File(shelfDir, "orphan").writeText("x")
         File(shelfDir, "half.tmp").mkdirs()
+        val indexDir = File(root, "txt-index").apply { mkdirs() }
+        val liveIndex = File(indexDir, db.bookDao().get(id)!!.localFile + ".idx").apply { writeText("live") }
+        val orphanIndex = File(indexDir, "orphan.idx").apply { writeText("orphan") }
+        val partialIndex = File(indexDir, liveIndex.name + ".tmp").apply { writeText("partial") }
 
         assertEquals(2, repo.cleanOrphans())
+        assertTrue(liveIndex.exists())
+        assertFalse(orphanIndex.exists())
+        assertFalse(partialIndex.exists())
         assertTrue(File(shelfDir, db.bookDao().get(id)!!.localFile).exists())
     }
     @Test fun cancelledReplacementDoesNotLeakOrDeleteTheOldCopy() = runBlocking<Unit> {

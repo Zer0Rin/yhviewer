@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="zh" data-theme="/*THEME*/">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Book</title>
+  <link rel="stylesheet" href="/assets/shared/themes.css">
+  <!--
+    v11 连续滚动的外层页面（只有我们自己的脚本，见 FlowShell.kt）。
+
+    每章是一个同源 iframe：sandbox 不含 allow-scripts，书里的脚本一律不执行；
+    allow-same-origin 让本页能量章节高度、实时改主题和排版。iframe 高度 = 章节内容高度，
+    整本书只有本页一个滚动条。只保留当前章附近的 MAX 章，滚到边缘时在前后补章、远处的章移除；
+    在视口上方插入或移除章节时按"视口顶部所在章节 + 偏移"补偿滚动位置，阅读的文字不跳。
+
+    原生端没有 JS 桥：通过 evaluateJavascript 读 YH.state()（当前章,章内比例），
+    查找栏打开时调用 YH.hold(true) 暂停补章，避免查找结果数变化。
+  -->
+  <style>
+    html, body { margin: 0; padding: 0; background: var(--bg); overflow-anchor: none; }
+    section { display: block; }
+    iframe { display: block; width: 100%; height: 0; border: 0; background: var(--bg); }
+    .gap { height: 36px; display: flex; align-items: center; justify-content: center; }
+    .gap::before { content: ""; width: 72px; border-top: 2px dotted var(--border); }
+    .edge { text-align: center; color: var(--muted); font: 13px/1.6 sans-serif; padding: 24px 0 72px; }
+  </style>
+</head>
+<body>
+  <div id="flow"></div>
+  <div id="continuation" aria-hidden="true"></div>
+
+  <!-- Kotlin 替换成 JSON：{"count": 120, "start": 3, "ratio": 0.4, "anchor": null, "urls": [...] 或 "pattern": "/txt/{i}.html"} -->
+  <script type="application/json" id="payload">/*PAYLOAD*/</script>
+  <script>
+  (function () {
+    'use strict';
+    var P = JSON.parse(document.getElementById('payload').textContent);
+    var flow = document.getElementById('flow');
+    var continuation = document.getElementById('continuation');
+    var MAX = 5;                 // 同时保留的章节数
+    var secs = [];               // 按章节顺序：{ i, el, frame, h, loaded }
+    // Do not grow the searchable frame window before native has synchronized
+    // the latest Find/pending-hit state. The payload may predate opening Find.
+    var ready = false, hold = true, busy = null, ticking = false;
+    var pendingLink = '';
+    var target = { i: P.start, ratio: P.ratio || 0, anchor: P.anchor || null };
+    var theme = document.documentElement.getAttribute('data-theme');
+    var reading = null;          // null：用章节自带的排版
+
+    function url(i) { return P.urls ? P.urls[i] : P.pattern.replace('{i}', String(i)); }
+    function vh() { return window.innerHeight || document.documentElement.clientHeight; }
+    function top(s) { return s.el.offsetTop; }
+    function find(i) { for (var k = 0; k < secs.length; k++) if (secs[k].i === i) return secs[k]; return null; }
+    function doc(s) {
+      try {
+        var d = s.frame.contentDocument;
+        return d && d.documentElement && d.location.href !== 'about:blank' ? d : null;
+      } catch (e) { return null; }
+    }
+    function contentHeight(s) {
+      var d = doc(s);
+      if (!d) return 0;
+      return Math.max(d.documentElement.scrollHeight, d.body ? d.body.scrollHeight : 0);
+    }
+
+    // 视口顶部所在的章节，和视口顶部在它里面的偏移
+    function anchorAt() {
+      var y = window.scrollY;
+      for (var k = 0; k < secs.length; k++) {
+        var s = secs[k], t = top(s);
+        if (y < t + s.el.offsetHeight) return { s: s, off: y - t };
+      }
+      return null;
+    }
+    function keep(a) { if (a && a.s.el.isConnected) window.scrollTo(0, top(a.s) + a.off); }
+
+    // Persist the chapter at viewport top. Keep the legacy scrollable-height
+    // ratio, extending it above 1 only for continuous tail/gap offsets.
+    function current() {
+      var probe = window.scrollY, s = null;
+      for (var k = 0; k < secs.length; k++) if (probe >= top(secs[k])) s = secs[k];
+      s = s || secs[0];
+      if (!s) return null;
+      var offset = Math.max(0, window.scrollY - top(s));
+      var span = Math.max(0, s.h - vh());
+      // 0..1 keeps the old single-chapter meaning, even for subpixel spans.
+      // Beyond its end, reserve >1 for the remaining continuous offset. A
+      // zero-span chapter therefore encodes any positive offset as 1+offset.
+      var r = offset > span ? 1 + (offset - span) / Math.max(1, span) : (span > 0 ? offset / span : 0);
+      return { i: s.i, ratio: Math.max(0, r), fraction: Math.max(0, (window.scrollY - top(s)) / Math.max(1, s.el.offsetHeight)) };
+    }
+
+    function scrollToChapter(i, ratio, anchor) {
+      var s = find(i);
+      if (!s) return;
+      var span = Math.max(0, s.h - vh()), r = Math.max(0, ratio || 0);
+      var y = top(s) + span * Math.min(1, r) + Math.max(0, r - 1) * Math.max(1, span);
+      if (anchor) {
+        var d = doc(s), el = d && (d.getElementById(anchor) || d.getElementsByName(anchor)[0]);
+        if (el) y = top(s) + el.getBoundingClientRect().top;
+      }
+      window.scrollTo(0, Math.max(0, y));
+    }
+
+    // 量高度。shrink：先压到 0 再量（字号变小后章节会变短）；量的时候用 minHeight 撑住页面，
+    // 否则页面临时变矮，浏览器会把滚动位置截断
+    function fit(list, shrink) {
+      var changed = false;
+      if (shrink) flow.style.minHeight = flow.offsetHeight + 'px';
+      list.forEach(function (s) {
+        if (!doc(s)) return;
+        if (shrink) s.frame.style.height = '0px';
+        var h = contentHeight(s);
+        if (shrink || h > s.h + 1) {          // 平时只长不缩：图片加载完会变高
+          if (h !== s.h) changed = true;
+          s.h = h;
+        }
+        s.frame.style.height = s.h + 'px';
+      });
+      if (shrink) flow.style.minHeight = '';
+      return changed;
+    }
+
+    function applyLive(s) {
+      var d = doc(s);
+      if (!d) return;
+      d.documentElement.setAttribute('data-theme', theme);
+      if (reading === null) return;
+      var st = d.getElementById('yh-reading');
+      if (!st) {
+        st = d.createElementNS('http://www.w3.org/1999/xhtml', 'style');
+        st.setAttribute('id', 'yh-reading');
+        (d.head || d.documentElement).appendChild(st);
+      }
+      if (st.textContent !== reading) st.textContent = reading;
+    }
+
+    // The shell is trusted; chapter documents are scriptless. Capture real
+    // local anchor taps before an iframe navigates, then let native route them.
+    function captureLinks(s) {
+      var d = doc(s);
+      if (!d || s.linkDoc === d) return;
+      s.linkDoc = d;
+      d.addEventListener('click', function (e) {
+        if (!e.isTrusted || e.button !== 0 || e.defaultPrevented ||
+            e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        var a = e.target && e.target.closest && e.target.closest('a[href]');
+        if (!a || a.hasAttribute('download')) return;
+        var target = (a.getAttribute('target') || '').toLowerCase();
+        if (target && target !== '_self') return;
+        try {
+          var u = new URL(a.href, d.location.href);
+          if (u.origin !== window.location.origin || u.origin !== new URL(d.location.href).origin ||
+              !u.pathname.startsWith('/book/') || u.pathname.length <= 6 || u.search ||
+              u.username || u.password) return;
+          var route = u.pathname + u.hash;
+          if (route.length > 2048) return;
+          e.preventDefault();
+          if (!pendingLink) pendingLink = route;
+        } catch (_) { /* Invalid book URL: leave it to WebView policy. */ }
+      }, true);
+    }
+
+    function make(i) {
+      var el = document.createElement('section');
+      el.setAttribute('data-ch', String(i));
+      var f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-same-origin');
+      f.setAttribute('scrolling', 'no');
+      f.setAttribute('title', String(i + 1));
+      var s = { i: i, el: el, frame: f, h: 0, loaded: false };
+      f.addEventListener('load', function () { if (doc(s)) loaded(s); });
+      el.appendChild(f);
+      var tail = document.createElement('div');
+      if (i < P.count - 1) tail.className = 'gap';
+      else { tail.className = 'edge'; }
+      el.appendChild(tail);
+      f.src = url(i);
+      return s;
+    }
+
+    function add(i, before) {
+      var a = anchorAt();
+      // Reserve the slot before creating a frame. For very short chapters, loading
+      // farther away only to evict it would cause an endless append/evict loop.
+      if (secs.length >= MAX) {
+        var c = current(), victim = before ? secs[secs.length - 1] : secs[0];
+        if (!c || victim.i === c.i || (a && a.s === victim) || victim === busy ||
+            Math.abs(i - c.i) >= Math.abs(victim.i - c.i)) return false;
+        victim.el.remove();
+        secs.splice(secs.indexOf(victim), 1);
+        keep(a);
+      }
+      var s = make(i);
+      busy = s;
+      if (before) { flow.insertBefore(s.el, flow.firstChild); secs.unshift(s); keep(a); }
+      else { flow.appendChild(s.el); secs.push(s); }
+      return true;
+    }
+
+    function loaded(s) {
+      if (s.loaded || !s.el.isConnected) return;
+      var a = anchorAt();
+      s.loaded = true;
+      captureLinks(s);
+      applyLive(s);
+      fit([s], true);
+      if (!ready) {
+        updateContinuation();
+        scrollToChapter(target.i, target.ratio, target.anchor);
+        ready = true;
+      } else keep(a);
+      if (busy === s) busy = null;
+      trim();
+      fill();
+    }
+
+    // 只保留当前章附近的 MAX 章；从离当前章远的一头移除
+    function trim() {
+      while (secs.length > MAX) {
+        var c = current(), a = anchorAt();
+        var first = secs[0], last = secs[secs.length - 1];
+        var victim = c && (c.i - first.i) >= (last.i - c.i) ? first : last;
+        if (victim === busy || (a && a.s === victim)) return;
+        victim.el.remove();
+        secs.splice(secs.indexOf(victim), 1);
+        if (victim === first) keep(a);
+      }
+    }
+
+    // 离底部不到两屏 → 补下一章；离顶部不到一屏 → 补上一章。一次只加载一章
+    function updateContinuation() {
+      // With <=5 tiny chapters, the window may be shorter than one viewport.
+      // A blank, nonsearchable runway lets its top anchor advance before eviction.
+      var last = secs[secs.length - 1];
+      continuation.style.height = last ? Math.max(0, vh() - (last.i === P.count - 1 ? last.el.offsetHeight : 0)) + 'px' : '0px';
+    }
+
+    function fill() {
+      updateContinuation();
+      if (!ready || hold || busy || !secs.length) return;
+      var y = window.scrollY, h = vh(), total = flow.offsetHeight;
+      var first = secs[0], last = secs[secs.length - 1];
+      if (last.i < P.count - 1 && total - (y + h) < 2 * h && add(last.i + 1, false)) return;
+      if (first.i > 0 && y < h) return add(first.i - 1, true);
+    }
+
+    function relayout() {
+      var c = ready ? current() : null;
+      var anchor = null, active = c && find(c.i), d = active && doc(active);
+      if (d && d.elementFromPoint) {
+        var offset = Math.max(0, window.scrollY - top(active));
+        var el = d.elementFromPoint((active.frame.clientWidth || window.innerWidth) / 2, offset);
+        if (el && el !== d.body && el !== d.documentElement) {
+          var rect = el.getBoundingClientRect();
+          if (rect.height > 0) anchor = { el: el, fraction: (offset - rect.top) / rect.height };
+        }
+      }
+      secs.forEach(applyLive);
+      fit(secs, true);
+      updateContinuation();
+      if (c) {
+        var s = find(c.i);
+        if (s) {
+          var offset = c.fraction * s.el.offsetHeight;
+          if (anchor && anchor.el.isConnected) {
+            var rect = anchor.el.getBoundingClientRect();
+            offset = rect.top + anchor.fraction * rect.height;
+          }
+          window.scrollTo(0, top(s) + offset);
+        }
+      }
+    }
+
+    window.setTheme = function (t) {
+      if (['auto', 'paper', 'ink', 'terminal'].indexOf(t) < 0) return;
+      theme = t;
+      document.documentElement.setAttribute('data-theme', t);
+      relayout();
+    };
+    window.setReading = function (css) { reading = String(css); relayout(); };
+
+    window.YH = {
+      state: function () {
+        if (!ready) return '';
+        var c = current();
+        return c ? c.i + ',' + c.ratio.toFixed(4) : '';
+      },
+      hold: function (on) { hold = !!on; if (!hold) fill(); },
+      takeLink: function () { var link = pendingLink; pendingLink = ''; return link; },
+    };
+
+    window.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; fill(); });
+    }, { passive: true });
+    window.addEventListener('resize', function () { if (ready) relayout(); });
+    // 图片等加载完章节会变高；视口上方的章节变高时补偿滚动位置
+    // 还在加载图片的章节，正文解析完就先显示出来（load 事件要等所有图片）
+    setInterval(function () {
+      var a = anchorAt();
+      var visible = secs.filter(function (s) { var d = doc(s); return s.loaded || (d && d.readyState !== 'loading'); });
+      if (fit(visible, false) && ready) keep(a);
+      // DOM is usable before slow images finish; loaded() remains idempotent.
+      visible.filter(function (s) { return !s.loaded; }).forEach(loaded);
+      fill();
+    }, 400);
+
+    var s0 = make(P.start);
+    busy = s0;
+    secs.push(s0);
+    flow.appendChild(s0.el);
+  })();
+  </script>
+</body>
+</html>
