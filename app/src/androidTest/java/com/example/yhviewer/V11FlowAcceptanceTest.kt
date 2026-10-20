@@ -196,6 +196,85 @@ class V11FlowAcceptanceTest {
 
     @Test fun continuousIsTheDefault() { assertTrue(ReadingPrefs().continuous) }
 
+    @Test fun v16SettingsScreenShowsFlavorPrivacyLicenseAndReturnsToShelf() {
+        launch().use { s ->
+            compose.onNodeWithContentDescription("设置").performClick()
+            waitText("隐私与安全")
+            compose.onNodeWithText(AboutInfo.versionLine(BuildConfig.VERSION_NAME, BuildConfig.FLAVOR)).assertIsDisplayed()
+            compose.onNodeWithText("作者").assertIsDisplayed()
+            compose.onNodeWithText("项目主页").assertIsDisplayed()
+            exportV7Screenshot("v16-settings-${BuildConfig.FLAVOR}.png")
+            if (AppCapabilities.pythonAvailable) {
+                compose.onNodeWithText("Pyodide").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("CPython").performScrollTo().assertIsDisplayed()
+            } else {
+                compose.onNodeWithText("Pyodide").assertDoesNotExist()
+                compose.onNodeWithText("CPython").assertDoesNotExist()
+            }
+            compose.onNode(hasText("YHViewer") and hasClickAction()).performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("MIT License", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(hasText("Permission is hereby granted", substring = true)).assertExists()
+            compose.onNodeWithText("关闭").performClick()
+            Espresso.pressBack()
+            waitText("书架")
+        }
+    }
+
+    @Test fun v16BookGlassTopbarAlignsWithPageAndAaHasNoChapterProgress() {
+        val id = runBlocking { fixtures.import(fixtures.epub(count = 20)) }
+        launch().use { s ->
+            open(s, id)
+            compose.onNodeWithText("Aa").performClick()
+            compose.onNodeWithText("进度").assertDoesNotExist()
+            compose.onNodeWithContentDescription("章节进度").assertDoesNotExist()
+            Espresso.pressBack()
+
+            fun assertGlassMatches(themeLabel: String, screenshot: String) {
+                compose.onNodeWithText("Aa").performClick()
+                compose.onNodeWithText(themeLabel).performClick()
+                Espresso.pressBack()
+                compose.waitForIdle()
+                SystemClock.sleep(500)
+                assertEquals("Glass overlay should contain bottom and top regions ($themeLabel)", "2", js(s, "document.querySelectorAll('#yh-glass > div').length"))
+                val rects = JSONArray(JSONTokener(js(s, "JSON.stringify([...document.querySelectorAll('#yh-glass > div')].map(e=>[parseFloat(e.style.top),parseFloat(e.style.height),parseFloat(e.style.borderRadius),parseFloat(getComputedStyle(e).opacity)]))")).nextValue().toString())
+                val topBarRect = rects.getJSONArray(1)
+                val bounds = compose.onNodeWithTag("book-top-bar-glass", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+                val wv = view(s)
+                var viewTop = 0
+                var scale = 1f
+                s.onActivity {
+                    val location = IntArray(2)
+                    wv.getLocationOnScreen(location)
+                    viewTop = location[1]
+                    @Suppress("DEPRECATION")
+                    run { scale = wv.scale }
+                }
+                val cssScreenTop = topBarRect.getDouble(0) * scale + viewTop
+                assertEquals("Top glass should align with native top bar ($themeLabel)", bounds.top.toDouble(), cssScreenTop, (2f * scale).toDouble())
+                assertEquals("Top glass should start at screen top ($themeLabel)", 0.0, cssScreenTop, (2f * scale).toDouble())
+                assertEquals("Top glass corners should be square ($themeLabel)", 0.0, topBarRect.getDouble(2), .1)
+                assertEquals("Bottom capsule glass should also be present ($themeLabel)", 1.0, rects.getJSONArray(0).getDouble(3), .01)
+                exportV7Screenshot(screenshot)
+            }
+
+            assertGlassMatches("纸张（浅）", "v16-reader-glass-paper.png")
+            assertGlassMatches("墨色（深）", "v16-reader-glass-ink.png")
+
+            val wv = view(s)
+            var scale = 1f
+            s.onActivity {
+                @Suppress("DEPRECATION")
+                run { scale = wv.scale }
+            }
+            tapRenderedWebViewPoint(instrumentation, wv, wv.width / (2f * scale), wv.height / (2f * scale))
+            compose.waitForIdle()
+            SystemClock.sleep(700)
+            val opacity = js(s, "JSON.stringify([...document.querySelectorAll('#yh-glass > div')].map(e=>parseFloat(getComputedStyle(e).opacity)))")
+            assertFalse("Glass regions should fade with the hidden toolbars; opacity=$opacity", compose.onAllNodesWithTag("book-top-bar-glass", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+            assertTrue("Glass regions should become transparent with the hidden toolbars; opacity=$opacity", opacity.contains("0"))
+        }
+    }
+
     @Test fun tallEpubAaSheetStaysBelowStatusBarInContinuousMode() = verifyTallEpubAaSheet(true)
 
     @Test fun tallEpubAaSheetStaysBelowStatusBarInSinglePageMode() = verifyTallEpubAaSheet(false)

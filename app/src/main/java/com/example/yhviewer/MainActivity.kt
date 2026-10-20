@@ -86,6 +86,7 @@ fun AppRoot(vm: ShelfViewModel) {
             onOpenFolder = { folderPicker.launch(null) },
         )
         Screen.Reader -> ReaderScreen(vm)
+        Screen.Settings -> SettingsScreen(onBack = vm::closeSettings)
     }
 }
 

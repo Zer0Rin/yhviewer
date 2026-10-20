@@ -37,6 +37,8 @@ import java.io.IOException
 sealed interface Screen {
     data object Shelf : Screen
     data object Reader : Screen
+    /** v16：设置 / 关于 */
+    data object Settings : Screen
 }
 
 sealed interface ReaderState {
@@ -499,6 +501,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         goToChapter(index, fragment)
         return true
     }
+
+    fun openSettings() { if (screen == Screen.Shelf) screen = Screen.Settings }
+    fun closeSettings() { if (screen == Screen.Settings) screen = Screen.Shelf }
 
     fun backToShelf() {
         editorSession?.close()

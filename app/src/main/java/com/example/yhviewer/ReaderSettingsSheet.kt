@@ -50,7 +50,7 @@ import kotlin.math.roundToInt
 
 /** v13：同一个设置面板用在书和单页文档上，按内容显示不同的项 */
 enum class SettingsScope {
-    /** TXT / EPUB：进度、主题、字号、行距、页边距、字体、翻页开关 */
+    /** TXT / EPUB：书签、主题、字号、行距、页边距、字体、翻页开关（v16 去掉了"进度"：目录可以代替） */
     BOOK,
     /** Markdown：主题、字号、行距、页边距、字体 */
     MARKDOWN,
@@ -68,8 +68,7 @@ private val GLASS_SHAPE = RoundedCornerShape(24.dp)
 private val SHEET_TOP_GAP = 56.dp
 /** M3 默认拖拽把手占的高度（上下各 22dp 边距 + 4dp 横线） */
 private val DRAG_HANDLE_HEIGHT = 48.dp
-/** 超过这么多章，进度滑杆不画刻度 */
-private const val MAX_TICKED_CHAPTERS = 60
+
 
 /**
  * 阅读设置（从底部弹出）。
@@ -89,9 +88,6 @@ fun ReaderSettingsSheet(
     scope: SettingsScope = SettingsScope.BOOK,
     onPreview: (ReadingPrefs?) -> Unit = {},
     onDraggingChange: (Boolean) -> Unit = {},
-    chapter: Int = 0,
-    chapterCount: Int = 0,
-    onChapter: (Int) -> Unit = {},
     onBookmark: (() -> Unit)? = null,
     wrap: Boolean? = null,
     onWrap: (() -> Unit)? = null,
@@ -195,21 +191,6 @@ fun ReaderSettingsSheet(
             if (scope == SettingsScope.BOOK) {
                 onBookmark?.let { add ->
                     SettingRow(null) { TextButton(onClick = add, modifier = Modifier.fillMaxWidth()) { Text("添加当前位置书签") } }
-                }
-                if (chapterCount > 1) SettingRow(null) {
-                    Column(pad) {
-                        var draft by remember(chapter) { mutableFloatStateOf(chapter.toFloat()) }
-                        Label("进度", "第 ${draft.roundToInt() + 1} / $chapterCount 章")
-                        Slider(
-                            modifier = Modifier.semantics { contentDescription = "章节进度" },
-                            value = draft,
-                            onValueChange = { draft = it },
-                            valueRange = 0f..(chapterCount - 1).toFloat(),
-                            // v15：章节很多时不画刻度（上千个刻度每帧都要画，面板动画会变慢），拖动时按章取整
-                            steps = if (chapterCount <= MAX_TICKED_CHAPTERS) (chapterCount - 2).coerceAtLeast(0) else 0,
-                            onValueChangeFinished = { onChapter(draft.roundToInt()) },
-                        )
-                    }
                 }
             }
 

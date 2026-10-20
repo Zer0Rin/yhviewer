@@ -1,6 +1,8 @@
 package com.example.yhviewer
 
 import android.app.Activity
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.CompositionLocalProvider
@@ -306,7 +308,14 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
     val flow = vm.reading.continuous
     val gestures = ReaderGestures(
         tapToTurn = vm.reading.tapToTurn,
-        onToggleBars = { barsVisible = !barsVisible },
+        onToggleBars = {
+            if (barsVisible) {
+                // Clear both webpage blur layers at the same time the toolbars fade out.
+                glass.set("top-bar", null)
+                glass.set("chapter-bar", null)
+            }
+            barsVisible = !barsVisible
+        },
         onReachEnd = if (flow) ({}) else vm::nextChapter,
         onReachStart = if (flow) ({}) else vm::prevChapterFromStart,
     )
@@ -344,10 +353,11 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 find = find,
             )
 
+            // v16：顶栏也是液态玻璃，和底部胶囊一样只淡入淡出，页面里的模糊区域能和它对齐
             AnimatedVisibility(
                 visible = (barsVisible || find.open) && !sliderDragging,
-                enter = slideInVertically { -it } + fadeIn(),
-                exit = slideOutVertically { -it } + fadeOut(),
+                enter = fadeIn(tween(160)),
+                exit = fadeOut(tween(160)),
                 modifier = Modifier.align(Alignment.TopCenter),
             ) { Column {
                 if (find.open) FindBar(
@@ -364,6 +374,15 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                         )
                     },
                     navigationIcon = { TextButton(onClick = vm::backToShelf) { Text("‹ 书架") } },
+                    // 顶栏铺到状态栏下面：整块是玻璃（直角，网页里的模糊区域也是直角）
+                    modifier = Modifier
+                        .testTag("book-top-bar-glass")
+                        .glassRegion("top-bar", visible = barsVisible && !sliderDragging && !find.open, radius = 0.dp)
+                        .liquidGlass(RectangleShape, blurBehind = glassSupported),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                    ),
                     actions = {
                         TextButton(onClick = { scope.launch { drawerState.open() } }) { Text("目录") }
                         TextButton(onClick = { find.open = true }) { Text("搜索") }
@@ -383,6 +402,7 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
                 ChapterBar(
                     index = vm.chapter,
                     count = titles.size,
+                    glassVisible = barsVisible && !sliderDragging,
                     onPrev = vm::prevChapter,
                     onNext = vm::nextChapter,
                 )
@@ -409,9 +429,6 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             onReading = vm::updateReading,
             onPreview = vm::previewReading,
             onDraggingChange = { sliderDragging = it },
-            chapter = vm.chapter,
-            chapterCount = titles.size,
-            onChapter = { vm.goToChapter(it) },
             onDismiss = { settingsOpen = false; sliderDragging = false },
             onBookmark = {
                 settingsOpen = false
@@ -652,9 +669,9 @@ private fun chapterTitles(doc: OpenedDoc): List<String> = when (doc) {
 }
 
 @Composable
-private fun ChapterBar(index: Int, count: Int, onPrev: () -> Unit, onNext: () -> Unit) {
+private fun ChapterBar(index: Int, count: Int, glassVisible: Boolean, onPrev: () -> Unit, onNext: () -> Unit) {
     // 浮动胶囊（Lens）：不再是贴底的整条工具栏，正文在胶囊两侧和下方仍然可见
-    FloatingCapsule(glassKey = "chapter-bar") {
+    FloatingCapsule(glassKey = "chapter-bar", glassVisible = glassVisible) {
         TextButton(onClick = onPrev, enabled = index > 0) { Text("‹ 上一章") }
         Text(
             if (count > 1) "${index + 1} / $count" else "",

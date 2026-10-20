@@ -48,6 +48,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -223,7 +226,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> 
                     onCancel = { selectedIds = emptyList() },
                 )
             } else {
-                ShelfHeader(list, onOpenFile, onOpenFolder)
+                ShelfHeader(list, onOpenFile, onOpenFolder, onSettings = vm::openSettings)
             }
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 UnderlineField(value = vm.query, onValueChange = vm::updateQuery, placeholder = "搜索书名、作者、文件名")
@@ -336,7 +339,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> 
 // ======================= 头部 =======================
 
 @Composable
-private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit, onOpenFolder: () -> Unit) {
+private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit, onOpenFolder: () -> Unit, onSettings: () -> Unit = {}) {
     val yh = LocalYH.current
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
@@ -352,7 +355,14 @@ private fun ShelfHeader(list: List<Book>?, onOpenFile: () -> Unit, onOpenFolder:
                     color = yh.subtle,
                 )
             }
-            Text("书架", style = MaterialTheme.typography.headlineLarge, color = yh.fg)
+            // v16：书架标题右边的设置入口
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("书架", style = MaterialTheme.typography.headlineLarge, color = yh.fg)
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = onSettings, modifier = Modifier.semantics { contentDescription = "设置" }) {
+                    Icon(painterResource(R.drawable.ic_settings), contentDescription = null, tint = yh.muted, modifier = Modifier.size(22.dp))
+                }
+            }
         }
         OpenMenu(onOpenFile, onOpenFolder)
     }
