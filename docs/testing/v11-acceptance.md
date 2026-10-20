@@ -12,4 +12,4 @@ The original 30-file external pack stays outside Git. Its T05 file is an opt-in 
 
 Native boundary and fast-scroll bubble screenshots must contain generated documents only. Captures and actual native/performance outcomes are recorded in [v0.8 verification](../verification/V08_VERIFICATION.md).
 
-This task opens a PR only: no physical-phone operation, merge, tag or release.
+The initial v11 task opened PR #8 only. Later user-authorized signed TEST prereleases and the v12 same-fixture comparison are recorded in the verification report; no physical-phone operation, main merge or stable v0.8 publication.

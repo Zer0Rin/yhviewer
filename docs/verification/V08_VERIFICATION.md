@@ -1,8 +1,10 @@
 # v0.8.0 candidate verification
 
-Base: main `9e78f19` / v0.7.0. Candidate: `codex/v08-reading-flow`, version **0.8.0 / versionCode 9**, Room schema **5** unchanged. This work prepares a PR only; no phone operation, merge, tag or publication.
+Base: main `9e78f19` / v0.7.0. Candidate: `codex/v08-reading-flow`, version **0.8.0 / versionCode 9**, Room schema **5** unchanged. The initial integration prepared PR #8. Subsequent user-authorized signed TEST prereleases are recorded below; no phone operation, main merge or stable v0.8 release.
 
-## Build and source checks
+v12 update: the same30MiB-ish fixture now imports in1.328–1.444s and rebuilds a missing index in0.697–0.722s. [Corrected signed TEST packages](https://github.com/Zer0Rin/yhviewer/releases/tag/pr-8-test-v12) are available; see the before/after table below.
+
+## Initial v11 build and source checks
 
 - Strict and Standard: **248 JVM tests each**, zero failures/errors/skips.
 - Both debug APKs, both instrumentation APKs and both debug Lint tasks pass. Lint: zero errors,34 warnings and1 hint per edition; the new warning is a `UseKtx` suggestion for parsing a queued link.
@@ -42,7 +44,7 @@ Both cases pass1/1 (59.239s Strict,59.818s Standard). They additionally verify40
 
 ## v12 heading-window correction (2026-10-20)
 
-The previous table records the earlier matcher-region implementation and remains as the before measurement. The v12 patch replaces full-book matcher regions with candidate line windows. JVM tests include the supplied3,000 adversarial documents. A new Android comparison against the original full-text regex exposed a supplied-patch mismatch at `Chapter\u00A0\n12`: Android recognizes the nonbreaking space as regex whitespace. The scoped repair uses the active runtime’s `\s*` on short slices and scans added whitespace lines once. The original native assertion then passes in both editions; chapter titles, bodies and ordering are compared directly.
+The previous table records the earlier matcher-region implementation and remains as the before measurement. The v12 patch replaces full-book matcher regions with candidate line windows. JVM tests include the supplied3,000 adversarial documents. A new Android comparison against the original full-text regex exposed a supplied-patch mismatch at `Chapter\u00A0\n12`: Android recognizes the nonbreaking space as regex whitespace. The scoped repair uses the active runtime’s `\s*` on short slices and scans added whitespace lines once. The [Android Pattern reference](https://developer.android.com/reference/java/util/regex/Pattern#UNICODE_CHARACTER_CLASS) confirms that Android always uses Unicode character classes. The original native assertion then passes in both editions; chapter titles, bodies and ordering are compared directly.
 
 Same dedicated API37 emulator / WebView145, same unchanged test generator, **30,665,783 bytes /4000 chapters**, same heap and32MiB cap. No body/index assertion or benchmark fixture was relaxed.
 
@@ -55,7 +57,7 @@ Same dedicated API37 emulator / WebView145, same unchanged test generator, **30,
 
 Both v12 benchmark cases pass, including4000 chapters, indexed-open metadata/cache checks, sampled content, missing-index rebuild, reuse and cleanup. Both rebuilds are below the requested5-second diagnostic threshold, so no alternative optimization or stage instrumentation was introduced. These remain repository-operation timings on an emulator, not physical-device startup claims. Old books rebuild once; subsequent opens read the index.
 
-Both editions now pass249 JVM tests, debug/androidTest builds and Lint. Android whitespace/title parity passes Strict1/1 and Standard1/1; production Flow shell checks also pass. Independent v12 delta review approves spec and quality with no actionable findings. Final v12 CI and signed-test publication are pending. The line-window optimization is not an unconditional linear-time guarantee for adversarial LF-free inputs containing many Unicode-separated failed candidates; overlapping windows can still be revisited.
+Both editions now pass249 JVM tests, debug/androidTest builds and Lint. Android whitespace/title parity passes Strict1/1 and Standard1/1; production Flow shell checks also pass. Independent v12 delta review approves spec and quality with no actionable findings. [Final v12 CI39371815888](https://github.com/Zer0Rin/yhviewer/actions/runs/39371815888) on `413e2d2` passes both jobs; downloaded XML confirms Strict146/146, Standard155/155 and249 JVM tests per edition, zero failures/errors/skips. [Signed candidate39371815991](https://github.com/Zer0Rin/yhviewer/actions/runs/39371815991) passes APK verification and both API34 R8 startup checks. The [v12 TEST prerelease](https://github.com/Zer0Rin/yhviewer/releases/tag/pr-8-test-v12) includes both APKs and SHA256SUMS.txt; local verification confirms the official signing certificate,0.8.0/code9, permissions, Python asset provenance and checksums. The stable latest release remains v0.7.0. The line-window optimization is not an unconditional linear-time guarantee for adversarial LF-free inputs containing many Unicode-separated failed candidates; overlapping windows can still be revisited.
 
 ## Corrections established during integration
 

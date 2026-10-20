@@ -11,7 +11,7 @@
 
 **v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
 
-The **v0.8.0 candidate** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters and a draggable TOC fast scroller. It keeps the single-chapter option in Aa. See [candidate notes](docs/releases/v0.8.0.md) and [verification progress](docs/verification/V08_VERIFICATION.md); v0.7.0 remains the published release.
+The **v0.8.0 candidate** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters and a draggable TOC fast scroller. It keeps the single-chapter option in Aa. See [candidate notes](docs/releases/v0.8.0.md) and [verification progress](docs/verification/V08_VERIFICATION.md); [signed v12 test APKs](https://github.com/Zer0Rin/yhviewer/releases/tag/pr-8-test-v12) are available; v0.7.0 remains the stable release.
 
 Screenshots are native API 37 emulator captures of curated fictional documents. The sandbox capture shows a real 9/9 result; temporary-network-permission evidence is linked below.
 
