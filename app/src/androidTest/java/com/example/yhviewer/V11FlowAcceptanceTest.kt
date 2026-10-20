@@ -100,12 +100,21 @@ class V11FlowAcceptanceTest {
         assertTrue("At most five live chapter frames", js(s, "document.querySelectorAll('iframe').length").toInt() in 1..5)
     }
     private fun ready(s: ActivityScenario<MainActivity>, expectedStart: Int? = null, previousView: WebView? = null) {
-        compose.waitUntil(25_000) { runCatching { (previousView == null || view(s) !== previousView) &&
-            (expectedStart == null || js(s, "JSON.parse(document.getElementById('payload').textContent).start") == expectedStart.toString()) && js(s, "!!window.YH && YH.state()!=='' && [...document.querySelectorAll('iframe')].every(f=>f.contentDocument && f.contentDocument.readyState==='complete' && f.offsetHeight>0)") == "true" }.getOrDefault(false) }
+        val deadline = SystemClock.uptimeMillis() + 25_000
+        val readyNow = {
+            runCatching { (previousView == null || view(s) !== previousView) &&
+                (expectedStart == null || js(s, "JSON.parse(document.getElementById('payload').textContent).start") == expectedStart.toString()) &&
+                js(s, "!!window.YH && YH.state()!=='' && (()=>{const fs=[...document.querySelectorAll('iframe')];return fs.length>=1 && fs.length<=5 && fs.every(f=>f.contentDocument && f.contentDocument.readyState==='complete' && f.offsetHeight>0)})()") == "true" }.getOrDefault(false)
+        }
+        fun awaitReady() = compose.waitUntil((deadline - SystemClock.uptimeMillis()).coerceAtLeast(1)) { readyNow() }
+        awaitReady()
         // DOM readiness can precede the Compose effect's poll timeout. Drain
         // that queued work before tests drive WebView outside Compose actions.
         compose.mainClock.advanceTimeBy(400)
         compose.waitForIdle()
+        // Clock advancement can start a pending replacement navigation. Check
+        // the same shell identity and loaded frames again within the original deadline.
+        awaitReady()
         bounded(s)
     }
     private fun open(s: ActivityScenario<MainActivity>, id: Long) {
@@ -393,7 +402,7 @@ class V11FlowAcceptanceTest {
             val hits = runBlocking { checkNotNull(vm).searchBook(V11GeneratedFixtures.NEEDLE) }
             val hit = hits.filter { it.chapter == 6 }[2]
             model(s) { it.openHit(hit, V11GeneratedFixtures.NEEDLE, 2) }
-            ready(s)
+            ready(s, expectedStart = hit.chapter)
             waitText("3/3")
             compose.onNodeWithText("3/3").assertIsDisplayed()
             val thirdVisible = """(()=>{const f=document.querySelector('[data-ch="6"] iframe');if(!f?.contentDocument)return false;const p=[...f.contentDocument.querySelectorAll('p')].find(p=>p.textContent.includes('occurrence 16'));if(!p)return false;const r=p.getBoundingClientRect(),t=f.getBoundingClientRect().top;return t+r.bottom>0 && t+r.top<innerHeight})()"""
