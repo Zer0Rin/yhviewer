@@ -40,10 +40,27 @@ Unchanged buffered-generated fixture: **30,665,783 bytes (29.245MiB),4000 chapte
 
 Both cases pass1/1 (59.239s Strict,59.818s Standard). They additionally verify4000 chapters, matching sampled content, unchanged valid-index timestamp/bytes, file-backed storage and empty chapter cache before body reads, rebuilt-index reuse and index deletion with the document. These are repository timings in an instrumented process, **not cold app startup or physical-phone measurements**. The patch author's desktop benchmark is not used as Android evidence.
 
+## v12 heading-window correction (2026-10-20)
+
+The previous table records the earlier matcher-region implementation and remains as the before measurement. The v12 patch replaces full-book matcher regions with candidate line windows. JVM tests include the supplied3,000 adversarial documents. A new Android comparison against the original full-text regex exposed a supplied-patch mismatch at `Chapter\u00A0\n12`: Android recognizes the nonbreaking space as regex whitespace. The scoped repair uses the active runtime’s `\s*` on short slices and scans added whitespace lines once. The original native assertion then passes in both editions; chapter titles, bodies and ordering are compared directly.
+
+Same dedicated API37 emulator / WebView145, same unchanged test generator, **30,665,783 bytes /4000 chapters**, same heap and32MiB cap. No body/index assertion or benchmark fixture was relaxed.
+
+| Edition / implementation | Import + index | Open valid index | Missing-index rebuild | Following indexed open |
+|---|---:|---:|---:|---:|
+| Strict before |29.297s|67.753ms|29.770s|37.135ms|
+| Strict v12 |1.328s|66.423ms|0.697s|35.991ms|
+| Standard before |29.214s|64.086ms|30.431s|33.047ms|
+| Standard v12 |1.444s|63.867ms|0.722s|35.953ms|
+
+Both v12 benchmark cases pass, including4000 chapters, indexed-open metadata/cache checks, sampled content, missing-index rebuild, reuse and cleanup. Both rebuilds are below the requested5-second diagnostic threshold, so no alternative optimization or stage instrumentation was introduced. These remain repository-operation timings on an emulator, not physical-device startup claims. Old books rebuild once; subsequent opens read the index.
+
+Both editions now pass249 JVM tests, debug/androidTest builds and Lint. Android whitespace/title parity passes Strict1/1 and Standard1/1; production Flow shell checks also pass. Independent v12 delta review approves spec and quality with no actionable findings. Final v12 CI and signed-test publication are pending. The line-window optimization is not an unconditional linear-time guarantee for adversarial LF-free inputs containing many Unicode-separated failed candidates; overlapping windows can still be revisited.
+
 ## Corrections established during integration
 
 - Preserve exact legacy TXT splitting, including CRLF/lone CR, Unicode line starts, long heading numbers and cross-line `chapter` whitespace. Index v2 Base64 preserves tabs/newlines in titles, bounds private metadata reads and validates byte ranges. Existing chapter numbers and0–1 locators retain their meaning; optional Flow offsets preserve continuous chapter tails/gaps without a Room change.
-- The initial unchanged large fixture exposed Java OOM, then a native low-memory kill. Strict validation now uses bounded workspace; TXT import avoids redundant full-text decode/output buffers, and heading scans reuse one native ICU matcher. Earlier failed runs remain failures; the successful measurements above use the same fixture and heap limit.
+- The initial unchanged large fixture exposed Java OOM, then a native low-memory kill. Strict validation now uses bounded workspace; TXT import avoids redundant full-text decode/output buffers, and heading scans reuse one native ICU matcher. Earlier failed runs remain failures; the successful measurements above use the same fixture and heap limit. Reusing the matcher addressed native allocation accumulation but left the repeated full-input region cost; the later v12 table records the line-window correction.
 - Tiny windows originally could not advance; bounded nonsearchable continuation space now permits progress with at most five frames. Boundary serialization/reflow now preserves actual positions, including short chapters.
 - Native WebView did not deliver the expected subframe navigation callback. A real native tap changed the child URL while leaving the model stale. The trusted outer shell now captures real same-origin book-link clicks and exposes a bounded one-shot route to native polling; synthetic/external/top-target routes are excluded. Book scripts remain disabled and no JS bridge is added. Repeated unchanged position polls are deduplicated so progress saving still settles.
 - Find initialization starts held until native acknowledges the live Find state; readiness retries prevent an early open request from being lost. The final reviewer approved this repair.

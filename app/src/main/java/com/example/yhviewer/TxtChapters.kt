@@ -24,6 +24,7 @@ object TxtChapters {
         """^[ \t　]*(第[0-9０-９零〇一二两三四五六七八九十百千万]+[章节回卷集部篇]|chapter\s*\d+|序章|序言|楔子|引子|前言|后记|尾声|番外|终章)[^\n]{0,40}$""",
         setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE),
     )
+    private val REGEX_SPACES = Regex("""\s*""")
     /** 标题行去掉行首空白后，第一个字符只可能是这些 */
     private const val HEADING_STARTS = "第cC序楔引前后尾番终"
     const val FALLBACK_SIZE = 8_000
@@ -53,32 +54,62 @@ object TxtChapters {
         return if (out.size >= 2) out else bySize(text)
     }
 
-    /** 标题行：start = 行首，end = 行尾（换行符的位置） */
+    /**
+     * 标题行：start = 行首，end = 匹配结束处（行尾）。
+     *
+     * 语义和旧的"对全文 findAll 多行正则"完全一致，但每个候选行只把**这一行**交给正则：
+     * Android 的 ICU Matcher 每次设置输入（包括 region()）都会把整个输入复制一份到 native，
+     * 对全文逐个候选 region() 是 O(候选数 × 全文长度)，30 MB 的书要几十秒。
+     *
+     * 窗口为什么够：除了 chapter\s* 里的 \s，正则里没有能跨过 '\n' 的部分（[^\n]、$ 都停在 '\n' 前）。
+     * 所以窗口取到下一个 '\n'；只有"chapter 后面全是空白"时才往下扩展，直到遇到第一个非空白字符所在的行。
+     */
     private fun headings(text: String): List<TxtRange> {
         val out = ArrayList<TxtRange>()
-        // Android's ICU matcher owns native input storage. Creating a new matcher
-        // for every candidate can retain thousands of full-book native buffers
-        // until cleaners run, even while the Java heap looks healthy.
-        val matcher = HEADING_LINE.toPattern().matcher(text)
-            .useAnchoringBounds(false).useTransparentBounds(true)
+        val pattern = HEADING_LINE.toPattern()
+        val n = text.length
         var lineStart = 0
         var consumed = 0
-        while (lineStart < text.length) {
+        while (lineStart < n) {
             var k = lineStart
-            while (k < text.length && (text[k] == ' ' || text[k] == '\t' || text[k] == '　')) k++
-            if (lineStart >= consumed && k < text.length && text[k] in HEADING_STARTS) {
-                // Match the original multiline expression at candidate starts. In particular,
-                // chapter\s* may span lines and neither the numeric part nor its whitespace is bounded.
-                matcher.region(lineStart, text.length)
-                if (matcher.lookingAt()) {
-                    out += TxtRange(matcher.group().trim(), matcher.start(), matcher.end())
-                    consumed = matcher.end()
+            while (k < n && (text[k] == ' ' || text[k] == '\t' || text[k] == '　')) k++
+            if (lineStart >= consumed && k < n && text[k] in HEADING_STARTS) {
+                var end = text.indexOf('\n', k).let { if (it < 0) n else it }
+                var m = pattern.matcher(text.substring(lineStart, end))
+                var found = m.lookingAt()
+                if (!found && text.regionMatches(k, "chapter", 0, 7, ignoreCase = true) && onlyRegexSpace(text, k + 7, end)) {
+                    // chapter 后面这一行只剩空白：\s* 可以跨行，扩到第一个非空白字符所在的行
+                    while (end < n) {
+                        val next = text.indexOf('\n', end + 1)
+                        val nextEnd = if (next < 0) n else next
+                        // Check each added slice once; a long run of blank lines stays linear.
+                        val allSpace = onlyRegexSpace(text, end, nextEnd)
+                        end = nextEnd
+                        if (!allSpace) break
+                    }
+                    m = pattern.matcher(text.substring(lineStart, end))
+                    found = m.lookingAt()
+                }
+                if (found) {
+                    val matchEnd = lineStart + m.end()
+                    out += TxtRange(m.group().trim(), lineStart, matchEnd)
+                    consumed = matchEnd
                 }
             }
-            while (lineStart < text.length && text[lineStart] !in "\n\u0085\u2028\u2029") lineStart++
+            // 和 Java MULTILINE 的 ^ 一致：\n、\u0085、\u2028、\u2029 之后都算行首
+            while (lineStart < n) {
+                val c = text[lineStart]
+                if (c == '\n' || c == '\u0085' || c == '\u2028' || c == '\u2029') break
+                lineStart++
+            }
             lineStart++
         }
         return out
+    }
+
+    /** Use the active runtime's regex whitespace class (Android ICU differs from desktop Java). */
+    private fun onlyRegexSpace(text: String, from: Int, to: Int): Boolean {
+        return REGEX_SPACES.matches(text.substring(from, to))
     }
 
     private fun isBlank(text: String, from: Int, to: Int): Boolean {

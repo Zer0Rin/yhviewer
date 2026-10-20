@@ -84,6 +84,17 @@ class TxtIndexTest {
         }
     }
 
+    /** v0.8 修正：逐行窗口匹配（避免 Android ICU 每次 region() 复制全文）仍与旧实现逐字一致，含跨行 chapter\s* */
+    @Test fun lineWindowMatchingEqualsLegacyOnAdversarialTokens() {
+        val tokens = listOf("Chapter", "chapter", "CHAPTER ", " 12", "7 标题", "\n", "\n", "\n", "  ", "\t", "\u000B", "\u000C", "\u2028", "\u0085",
+            "第3章", "第一百章 名", "序章", "前言", "正文内容", "　", "x".repeat(45), "😀")
+        val r = Random(2026)
+        repeat(3000) { k ->
+            val doc = buildString { repeat(r.nextInt(1, 60)) { append(tokens[r.nextInt(tokens.size)]) } }
+            assertEquals("case $k: ${doc.replace("\n", "\\n")}", Legacy.split(doc), TxtChapters.split(doc))
+        }
+    }
+
     @Test fun splitRetainsLegacyUnboundedHeadingsAndWhitespace() {
         listOf(
             "第" + "一".repeat(90) + "章\n正文\n第二章\n正文",
