@@ -116,8 +116,9 @@ fun GlassBridge(host: GlassHost, handle: WebViewHandle) {
  */
 fun Modifier.liquidGlass(shape: Shape, blurBehind: Boolean): Modifier = composed {
     val yh = LocalYH.current
-    val tint = yh.surface.copy(alpha = if (blurBehind) 0.34f else 0.9f)
-    val sheen = Color.White.copy(alpha = if (yh.dark) 0.07f else 0.32f)
+    // v14：按用户反馈调得更通透（0.34 → 0.16；不能模糊时 0.9 → 0.8）
+    val tint = yh.surface.copy(alpha = if (blurBehind) 0.16f else 0.8f)
+    val sheen = Color.White.copy(alpha = if (yh.dark) 0.06f else 0.22f)
     val edgeTop = Color.White.copy(alpha = if (yh.dark) 0.22f else 0.75f)
     val edgeBottom = yh.line.copy(alpha = if (yh.dark) 0.55f else 0.35f)
     this

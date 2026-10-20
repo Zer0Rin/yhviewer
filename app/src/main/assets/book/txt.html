@@ -53,8 +53,8 @@
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
         d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .16s;' +
-          'background:color-mix(in srgb, var(--bg) 30%, transparent);' +
-          '-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6)';
+          'background:color-mix(in srgb, var(--bg) 14%, transparent);' +
+          '-webkit-backdrop-filter:blur(16px) saturate(1.5);backdrop-filter:blur(16px) saturate(1.5)';
         host.appendChild(d);
       }
       for (var i = 0; i < host.children.length; i++) {

@@ -1,10 +1,14 @@
 package com.example.yhviewer
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.webkit.WebView
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -163,7 +167,86 @@ class V11FlowAcceptanceTest {
     }
     private fun persisted(id: Long) = runBlocking { Locator.decode(checkNotNull(db.bookDao().get(id)).locator) }
 
+    private fun captureV14(name: String, s: ActivityScenario<MainActivity>, waitForIdle: Boolean = true) {
+        var badge: TextView? = null
+        s.onActivity { activity ->
+            val density = activity.resources.displayMetrics.density
+            badge = TextView(activity).apply {
+                text = "Android WebView ${WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"}"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(0x99000000.toInt())
+                setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+                elevation = 20 * density
+            }
+            (activity.window.decorView as FrameLayout).addView(
+                badge,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = (8 * density).toInt() },
+            )
+        }
+        if (waitForIdle) {
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(200)
+        }
+        exportV7Screenshot(name)
+        s.onActivity { activity -> (activity.window.decorView as FrameLayout).removeView(badge) }
+    }
+
     @Test fun continuousIsTheDefault() { assertTrue(ReadingPrefs().continuous) }
+
+    @Test fun v14ThemeUpdatesAllFramesSynchronouslyAndGlassStatesCanBeCaptured() {
+        val id = runBlocking { fixtures.import(fixtures.txt()) }
+        runBlocking { repo.savePosition(id, Locator(5, .4f), 12) }
+        launch().use { s ->
+            open(s, id)
+            val original = view(s)
+            val before = state(s)
+            captureV14("v14-paper-capsule-webview.png", s)
+            js(s, """
+                window.__v14ThemeSync=null; window.__v14ThemeAfterTwoFrames=null;
+                const setTheme=window.setTheme;
+                window.setTheme=function(t){
+                  setTheme(t);
+                  window.__v14ThemeSync={outer:document.documentElement.dataset.theme,
+                    frames:[...document.querySelectorAll('iframe')].map(f=>f.contentDocument?.documentElement?.dataset?.theme||null)};
+                  requestAnimationFrame(()=>requestAnimationFrame(()=>window.__v14ThemeAfterTwoFrames=YH.state()));
+                };
+            """.trimIndent())
+            model(s) { it.selectTheme(ReaderTheme.INK) }
+            compose.waitUntil(10_000) { js(s, "window.__v14ThemeSync!==null") == "true" }
+            val sameFrame = JSONObject(string(s, "JSON.stringify(window.__v14ThemeSync)"))
+            assertEquals("ink", sameFrame.getString("outer"))
+            val frameThemes = sameFrame.getJSONArray("frames")
+            assertTrue("At least one chapter iframe should be mounted", frameThemes.length() >= 1)
+            repeat(frameThemes.length()) { assertEquals("ink", frameThemes.getString(it)) }
+            assertSame("Theme change must retain the existing WebView", original, view(s))
+            compose.waitUntil(10_000) { js(s, "window.__v14ThemeAfterTwoFrames!==null") == "true" }
+            val restored = string(s, "window.__v14ThemeAfterTwoFrames").split(',')
+            assertEquals(before.first, restored[0].toInt())
+            assertEquals(before.second, restored[1].toFloat(), .04f)
+
+            captureV14("v14-ink-capsule-webview.png", s)
+            model(s) { it.selectTheme(ReaderTheme.TERMINAL) }
+            compose.waitUntil(10_000) { js(s, "document.documentElement.dataset.theme==='terminal'") == "true" }
+            captureV14("v14-terminal-highlight-webview.png", s)
+
+            compose.onNodeWithText("Aa").performClick()
+            compose.waitForIdle()
+            captureV14("v14-settings-sheet-webview.png", s)
+            val slider = compose.onNodeWithContentDescription("字号")
+            slider.performTouchInput {
+                down(center)
+                moveTo(centerRight, 500)
+            }
+            compose.waitForIdle()
+            captureV14("v14-glass-slider-transparent-sheet-webview.png", s)
+            slider.performTouchInput { up() }
+            compose.waitForIdle()
+            androidx.test.espresso.Espresso.pressBack()
+        }
+    }
+
     @Test fun idleFlowPollingAllowsAutomaticDebouncedPositionSave() {
         val id = runBlocking { fixtures.import(fixtures.txt()) }
         runBlocking { repo.savePosition(id, Locator(5, .4f), 12) }

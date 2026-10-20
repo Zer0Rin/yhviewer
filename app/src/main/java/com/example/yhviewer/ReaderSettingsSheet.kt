@@ -1,6 +1,5 @@
 package com.example.yhviewer
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
@@ -91,9 +90,13 @@ fun ReaderSettingsSheet(
     val latestOnDragging by rememberUpdatedState(onDraggingChange)
     LaunchedEffect(dragging) { latestOnDragging(dragging) }
 
-    val scrim by animateColorAsState(if (dragging) Color.Transparent else BottomSheetDefaults.ScrimColor, tween(160), label = "scrim")
-    val container by animateColorAsState(if (dragging) Color.Transparent else BottomSheetDefaults.ContainerColor, tween(160), label = "sheet")
     val chrome by animateFloatAsState(if (dragging) 0f else 1f, tween(160), label = "chrome")
+    // v14：只对"拖动中"的透明度做动画，颜色本身直接取主题色。以前对颜色做动画，切主题时面板会
+    // 比阅读页晚 160ms 渐变过去，看起来像分几块变色
+    val scrimBase = BottomSheetDefaults.ScrimColor
+    val containerBase = BottomSheetDefaults.ContainerColor
+    val scrim = scrimBase.copy(alpha = scrimBase.alpha * chrome)
+    val container = containerBase.copy(alpha = containerBase.alpha * chrome)
     val glassBehind = LocalGlassHost.current?.supported == true
 
     // 一行设置：拖动别的滑杆时隐去（保留占位，正在拖的滑杆不会移动）
