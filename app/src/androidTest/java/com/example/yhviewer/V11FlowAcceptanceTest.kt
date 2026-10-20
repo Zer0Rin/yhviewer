@@ -196,25 +196,17 @@ class V11FlowAcceptanceTest {
 
     @Test fun continuousIsTheDefault() { assertTrue(ReadingPrefs().continuous) }
 
-    @Test fun v16SettingsScreenShowsFlavorPrivacyLicenseAndReturnsToShelf() {
+    @Test fun v16SettingsScreenShowsFlavorPrivacyWithoutLicenseSectionAndReturnsToShelf() {
         launch().use { s ->
             compose.onNodeWithContentDescription("设置").performClick()
             waitText("隐私与安全")
             compose.onNodeWithText(AboutInfo.versionLine(BuildConfig.VERSION_NAME, BuildConfig.FLAVOR)).assertIsDisplayed()
             compose.onNodeWithText("作者").assertIsDisplayed()
             compose.onNodeWithText("项目主页").assertIsDisplayed()
+            compose.onNodeWithText("开源许可").assertDoesNotExist()
             exportV7Screenshot("v16-settings-${BuildConfig.FLAVOR}.png")
-            if (AppCapabilities.pythonAvailable) {
-                compose.onNodeWithText("Pyodide").performScrollTo().assertIsDisplayed()
-                compose.onNodeWithText("CPython").performScrollTo().assertIsDisplayed()
-            } else {
-                compose.onNodeWithText("Pyodide").assertDoesNotExist()
-                compose.onNodeWithText("CPython").assertDoesNotExist()
-            }
-            compose.onNode(hasText("YHViewer") and hasClickAction()).performScrollTo().performClick()
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("MIT License", substring = true)).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNode(hasText("Permission is hereby granted", substring = true)).assertExists()
-            compose.onNodeWithText("关闭").performClick()
+            compose.onNodeWithText("Pyodide").assertDoesNotExist()
+            compose.onNodeWithText("CPython").assertDoesNotExist()
             Espresso.pressBack()
             waitText("书架")
         }

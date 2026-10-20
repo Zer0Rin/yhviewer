@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,16 +25,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,11 +37,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
 /**
- * v16：设置页（书架右上角的齿轮进入）。目前只有"关于"类内容：版本、作者、项目主页、隐私说明、开源许可。
+ * v16：设置页（书架右上角的齿轮进入）。目前展示版本、作者、项目主页和隐私说明。
  * 以后有真正的设置项（默认主题、导入行为等）再加分组。
  */
 object AboutInfo {
@@ -55,7 +48,7 @@ object AboutInfo {
     const val HOMEPAGE = "https://github.com/Zer0Rin/yhviewer"
     const val ISSUES = "https://github.com/Zer0Rin/yhviewer/issues"
 
-    /** 开源许可：名称、许可证、assets 里的全文（不存在的条目不显示，例如 Strict 版没有 Pyodide） */
+    /** 打包校验用的许可证文件清单；设置页暂时不展示。 */
     data class License(val name: String, val license: String, val asset: String)
 
     val LICENSES = listOf(
@@ -97,9 +90,6 @@ fun SettingsScreen(onBack: () -> Unit) {
     val yh = LocalYH.current
     val context = LocalContext.current
     BackHandler(onBack = onBack)
-    var license by remember { mutableStateOf<AboutInfo.License?>(null) }
-    val available = remember { AboutInfo.LICENSES.filter { assetExists(context, it.asset) } }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -164,23 +154,6 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
 
-        // ---------- 开源许可 ----------
-        SectionTitle("开源许可")
-        available.forEach { l -> InfoRow(l.name, l.license) { license = l } }
-    }
-
-    license?.let { l ->
-        val text = remember(l) { readAsset(context, l.asset) }
-        AlertDialog(
-            onDismissRequest = { license = null },
-            confirmButton = { TextButton(onClick = { license = null }) { Text("关闭") } },
-            title = { Text("${l.name} · ${l.license}") },
-            text = {
-                Box(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                    Text(text, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = yh.fg)
-                }
-            },
-        )
     }
 }
 
@@ -213,12 +186,6 @@ private fun InfoRow(title: String, value: String, onClick: (() -> Unit)? = null)
         )
     }
 }
-
-private fun assetExists(context: Context, path: String): Boolean =
-    runCatching { context.assets.open(path).close(); true }.getOrDefault(false)
-
-private fun readAsset(context: Context, path: String): String =
-    runCatching { context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() } }.getOrDefault("（许可证文件缺失）")
 
 /** 用系统浏览器打开（Strict 版没有网络权限，但交给浏览器打开不受影响） */
 private fun openUrl(context: Context, url: String) {

@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** v16：设置 / 关于页的文案和许可证文件 */
+/** v16：设置 / 关于页的文案 */
 class V16AboutTest {
     @Test fun versionLineNamesTheEdition() {
         assertEquals("版本 0.9.0 · Strict 版", AboutInfo.versionLine("0.9.0", "strict"))
@@ -24,7 +24,7 @@ class V16AboutTest {
         assertFalse(standard.any { it.contains("没有网络权限") })
     }
 
-    /** 列出的许可证文件都随包分发：Pyodide / CPython 只在 Standard 版，其余在公共 assets */
+    /** 许可证文件继续随包分发，但设置页暂时不展示 */
     @Test fun everyListedLicenseIsPackaged() {
         AboutInfo.LICENSES.forEach { l ->
             val main = File("src/main/assets/${l.asset}")
