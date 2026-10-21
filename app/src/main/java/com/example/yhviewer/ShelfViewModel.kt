@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.lazy.LazyListState
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -501,6 +502,13 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         goToChapter(index, fragment)
         return true
     }
+
+    /**
+     * v17：书架列表的滚动位置放在 ViewModel 里。以前从书或设置页返回书架时总是回到最上面，
+     * 书多的时候要重新往下找。切换分组、类型或搜索时才回到顶部（见 ShelfScreen）。
+     */
+    val shelfListState = LazyListState()
+    internal var shelfFilterKey: String? = null
 
     fun openSettings() { if (screen == Screen.Shelf) screen = Screen.Settings }
     fun closeSettings() { if (screen == Screen.Settings) screen = Screen.Shelf }

@@ -97,7 +97,12 @@ fun ReaderSettingsSheet(
     val latestOnDragging by rememberUpdatedState(onDraggingChange)
     LaunchedEffect(dragging) { latestOnDragging(dragging) }
 
-    val chrome by animateFloatAsState(if (dragging) 0f else 1f, tween(160), label = "chrome")
+    // v17：开始拖动时其他内容隐去得快（120ms），松手后恢复稍慢（160ms），都用强 ease-out
+    val chrome by animateFloatAsState(
+        if (dragging) 0f else 1f,
+        if (dragging) Motion.exit() else Motion.enter(),
+        label = "chrome",
+    )
     // v14：只对"拖动中"的透明度做动画，颜色本身直接取主题色。以前对颜色做动画，切主题时面板会
     // 比阅读页晚 160ms 渐变过去，看起来像分几块变色
     val scrimBase = BottomSheetDefaults.ScrimColor
@@ -109,8 +114,8 @@ fun ReaderSettingsSheet(
     // 一行设置：拖动别的滑杆时隐去（保留占位，正在拖的滑杆不会移动）
     @Composable
     fun SettingRow(key: String?, content: @Composable () -> Unit) {
-        val alpha = if (key != null && key == active) 1f else chrome
-        Box(Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha }) { content() }
+        // 在 graphicsLayer 里读透明度：淡入淡出时只重绘，不重组整个面板
+        Box(Modifier.fillMaxWidth().graphicsLayer { alpha = if (key != null && key == active) 1f else chrome }) { content() }
     }
 
     @Composable
@@ -132,7 +137,11 @@ fun ReaderSettingsSheet(
             if (touching) active = key else if (active == key) active = null
         }
         val isActive = active == key
-        val glass by animateFloatAsState(if (isActive) 1f else 0f, tween(160), label = "glass")
+        val glass by animateFloatAsState(
+            if (isActive) 1f else 0f,
+            if (isActive) Motion.enter() else Motion.exit(),
+            label = "glass",
+        )
         SettingRow(key) {
             Box(Modifier.fillMaxWidth().glassRegion("slider-$key", visible = isActive, radius = 24.dp)) {
                 // 玻璃底：只在拖动时出现（淡入），不改变布局

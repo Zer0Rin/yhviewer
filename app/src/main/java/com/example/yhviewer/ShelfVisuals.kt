@@ -2,7 +2,7 @@ package com.example.yhviewer
 
 import android.text.format.DateUtils
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -108,18 +108,21 @@ internal fun dotProgressLit(fraction: Float, count: Int): Int = when {
 // ======================= 按压反馈（Lens） =======================
 
 /**
- * 按下时缩到 0.97，松手用弹簧回到 1。interactionSource 要和 clickable / combinedClickable 共用同一个。
- * 用 graphicsLayer，不触发重新布局。
+ * 按下时缩到 0.97，松手回到 1。interactionSource 要和 clickable / combinedClickable 共用同一个。
+ * 在 graphicsLayer 的 lambda 里读缩放值：动画过程中只重绘，不重组、不重新布局。
+ *
+ * v17：按下 100ms、松手 160ms，都用强 ease-out，不回弹。以前松手用阻尼 0.55 的弹簧，封面会抖一下；
+ * 阅读工具的按压反馈应该"稳"，回弹留给少见的、需要表现力的时刻。
  */
 @Composable
 fun Modifier.pressScale(interactionSource: MutableInteractionSource, pressed: Float = 0.97f): Modifier {
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val scale = animateFloatAsState(
         targetValue = if (isPressed) pressed else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 600f),
+        animationSpec = tween(if (isPressed) Motion.PRESS_MS else Motion.RELEASE_MS, easing = Motion.EaseOut),
         label = "pressScale",
     )
-    return graphicsLayer { scaleX = scale; scaleY = scale }
+    return graphicsLayer { scaleX = scale.value; scaleY = scale.value }
 }
 
 // ======================= 浮动胶囊（Lens） =======================

@@ -9,6 +9,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -79,14 +87,25 @@ fun AppRoot(vm: ShelfViewModel) {
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         tree?.let(vm::importFolder)
     }
-    when (vm.screen) {
-        Screen.Shelf -> ShelfScreen(
-            vm,
-            onOpenFile = { picker.launch(arrayOf("*/*")) },
-            onOpenFolder = { folderPicker.launch(null) },
-        )
-        Screen.Reader -> ReaderScreen(vm)
-        Screen.Settings -> SettingsScreen(onBack = vm::closeSettings)
+    // v17：书架、阅读页、设置页之间新页面 180ms 淡入（不位移：这是一天几十次的操作，要轻）。
+    // 旧页面立即移除，不和新页面同时存在，阅读页的 WebView 不会多活一段时间。
+    val screen = vm.screen
+    Box(Modifier.fillMaxSize().background(LocalYH.current.bg)) {
+        key(screen) {
+            val appear = remember { Animatable(0f) }
+            LaunchedEffect(Unit) { appear.animateTo(1f, tween(Motion.SCREEN_MS, easing = Motion.EaseOut)) }
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = appear.value }) {
+                when (screen) {
+                    Screen.Shelf -> ShelfScreen(
+                        vm,
+                        onOpenFile = { picker.launch(arrayOf("*/*")) },
+                        onOpenFolder = { folderPicker.launch(null) },
+                    )
+                    Screen.Reader -> ReaderScreen(vm)
+                    Screen.Settings -> SettingsScreen(onBack = vm::closeSettings)
+                }
+            }
+        }
     }
 }
 

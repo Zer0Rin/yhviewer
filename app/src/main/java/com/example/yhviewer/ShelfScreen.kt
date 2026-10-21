@@ -7,6 +7,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -197,6 +200,12 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> 
         if (loadedGroups != null && scope is ShelfScope.Group && groups.none { it.id == scope.id }) scopeKey = ShelfScope.All.key
     }
     BackHandler(enabled = selecting) { selectedIds = emptyList() }
+    // v17：换了分组、类型或搜索词才回到顶部；从阅读页返回时保持原来的滚动位置
+    val filterKey = "$scopeKey|$kindId|${vm.query.trim()}"
+    LaunchedEffect(filterKey) {
+        if (vm.shelfFilterKey != null && vm.shelfFilterKey != filterKey) vm.shelfListState.scrollToItem(0)
+        vm.shelfFilterKey = filterKey
+    }
 
     val sections = remember(list, scopeKey, kindId, searching) {
         list?.let { sectionsFor(it, scope, kind, searching) }
@@ -255,6 +264,7 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> 
                 )
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = vm.shelfListState,
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = if (selecting) 96.dp else 32.dp),
                 ) {
                     sections.continueReading?.let { hero ->
@@ -297,10 +307,11 @@ fun ShelfScreen(vm: ShelfViewModel, onOpenFile: () -> Unit, onOpenFolder: () -> 
         if (!selecting) Box(Modifier.align(Alignment.BottomCenter)) { ImportStatus(vm) }
 
         // 多选时的底部操作栏
+        // v17：从底部滑上来并淡入（抽屉曲线 220ms），退出更快（160ms）
         AnimatedVisibility(
             visible = selecting,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
+            enter = slideInVertically(tween(Motion.BAR_ENTER_MS, easing = Motion.EaseDrawer)) { it } + fadeIn(Motion.enter()),
+            exit = slideOutVertically(tween(Motion.RELEASE_MS, easing = Motion.EaseOut)) { it } + fadeOut(Motion.exit()),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val chosen = list.orEmpty().filter { it.id in selectedIds }

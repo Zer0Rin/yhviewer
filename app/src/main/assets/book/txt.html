@@ -52,14 +52,16 @@
       rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
-        d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .16s;' +
+        d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);' +
           'background:color-mix(in srgb, var(--bg) 14%, transparent);' +
           '-webkit-backdrop-filter:blur(16px) saturate(1.5);backdrop-filter:blur(16px) saturate(1.5)';
         host.appendChild(d);
       }
       for (var i = 0; i < host.children.length; i++) {
         var el = host.children[i], r = rects[i];
-        if (!r) { el.style.opacity = '0'; continue; }
+        // v17：和原生控件一致：出现 160ms，消失 120ms（Motion.ENTER_MS / EXIT_MS）
+        if (!r) { el.style.transitionDuration = '120ms'; el.style.opacity = '0'; continue; }
+        el.style.transitionDuration = '160ms';
         el.style.left = (+r.x || 0) + 'px'; el.style.top = (+r.y || 0) + 'px';
         el.style.width = Math.max(0, +r.w || 0) + 'px'; el.style.height = Math.max(0, +r.h || 0) + 'px';
         el.style.borderRadius = Math.max(0, +r.r || 0) + 'px';
