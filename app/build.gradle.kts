@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.zer0rin.yhviewer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "0.10.0"
+        versionCode = 12
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -38,12 +38,29 @@ android {
             buildConfigField("boolean", "NETWORK_CAPABLE", "false")
             buildConfigField("boolean", "PYTHON_RUNTIME", "false")
         }
+        create("strictRc") {
+            dimension = "network"
+            applicationIdSuffix = ".rc.strict"
+            buildConfigField("boolean", "NETWORK_CAPABLE", "false")
+            buildConfigField("boolean", "PYTHON_RUNTIME", "false")
+        }
         create("standard") {
             dimension = "network"
             isDefault = true
             buildConfigField("boolean", "NETWORK_CAPABLE", "true")
             buildConfigField("boolean", "PYTHON_RUNTIME", "true")
         }
+        create("standardRc") {
+            dimension = "network"
+            applicationIdSuffix = ".rc.standard"
+            buildConfigField("boolean", "NETWORK_CAPABLE", "true")
+            buildConfigField("boolean", "PYTHON_RUNTIME", "true")
+        }
+    }
+    // Keep the Standard-only INTERNET declaration and Python runtime in the RC variant.
+    sourceSets.getByName("standardRc") {
+        manifest.srcFile("src/standard/AndroidManifest.xml")
+        assets.srcDir("src/standard/assets")
     }
 
     signingConfigs {

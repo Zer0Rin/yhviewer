@@ -72,7 +72,7 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleStrictRelease :app:assembleStandardRelease --no-configuration-cache --stacktrace
+        run: ./gradlew :app:assembleStrictRelease :app:assembleStandardRelease :app:assembleStrictRcRelease :app:assembleStandardRcRelease --no-configuration-cache --stacktrace
 
       # 发布前校验：签名有效；Strict 无网络权限，Standard 必须有网络权限
       # （依赖库可能通过 Manifest 合并偷偷带进 INTERNET，所以检查最终产物，而不是源码里的 Manifest）
@@ -82,6 +82,12 @@ jobs:
           for flavor in strict standard; do
             APK="app/build/outputs/apk/$flavor/release/app-$flavor-release.apk"
             scripts/verify-release.sh "$APK" "$RELEASE_VERSION" io.github.zer0rin.yhviewer "$flavor"
+            cp "$APK" "yhviewer-$RELEASE_VERSION-$flavor.apk"
+          done
+          for flavor in strictRc standardRc; do
+            APK="app/build/outputs/apk/$flavor/release/app-$flavor-release.apk"
+            network="${flavor%Rc}"
+            scripts/verify-release.sh "$APK" "$RELEASE_VERSION" "io.github.zer0rin.yhviewer.rc.$network" "$network"
             cp "$APK" "yhviewer-$RELEASE_VERSION-$flavor.apk"
           done
           sha256sum "yhviewer-$RELEASE_VERSION-strict.apk" "yhviewer-$RELEASE_VERSION-standard.apk" > SHA256SUMS.txt

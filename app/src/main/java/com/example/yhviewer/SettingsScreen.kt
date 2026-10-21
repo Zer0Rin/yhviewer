@@ -65,8 +65,8 @@ object AboutInfo {
     /** 版本行，例如 "版本 0.9.0 · Standard 版" */
     fun versionLine(versionName: String, flavor: String): String {
         val edition = when (flavor.lowercase()) {
-            "strict" -> "Strict 版"
-            "standard" -> "Standard 版"
+            "strict", "strictrc" -> "Strict 版"
+            "standard", "standardrc" -> "Standard 版"
             else -> flavor
         }
         return if (edition.isBlank()) "版本 $versionName" else "版本 $versionName · $edition"
