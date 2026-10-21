@@ -433,7 +433,7 @@ class ShelfRepository(
             val local = File(dir, book.localFile)
             if (!local.exists()) throw IOException("本地副本丢失，请从原文件重新打开")
             when (book.type) {
-                DocType.EPUB -> EpubParser.parse(local).let { parsed ->
+                DocType.EPUB -> EpubCache.parse(local).let { parsed ->
                     OpenedDoc.Epub(book.id, book.name, locator, local, parsed.chapters, parsed.vertical)
                 }
                 DocType.TXT -> OpenedDoc.Txt(book.id, book.name, locator, TxtBook.open(local, txtIndexFile(book.localFile)))
@@ -513,6 +513,7 @@ class ShelfRepository(
         withContext(NonCancellable + Dispatchers.IO) {
             BundleStorage.removeUnreferenced(dir, book.localFile, dao.allLocalFiles())
             covers.delete(id)
+            if (book.type == DocType.EPUB) EpubCache.invalidate(File(dir, book.localFile))
             if (!BundlePaths.isBundle(book.localFile) && book.localFile !in dao.allLocalFiles()) {
                 runCatching { txtIndexFile(book.localFile).delete() }
             }
@@ -618,6 +619,29 @@ class ShelfRepository(
         // Shared across repository instances so recreation cannot clean another import's staging files.
         val storageLock = Mutex()
         const val SQL_BATCH_SIZE = 900
+    }
+}
+
+/**
+ * v17：EPUB 解析结果的内存缓存。以前每次打开都要重新解析目录文件（OPF、导航），1415 章的书每次都要等；
+ * 解压目录在导入后不再改动（重新导入会换一个新目录），所以按目录路径缓存即可。只留最近几本，内存很小。
+ */
+internal object EpubCache {
+    private const val MAX_BOOKS = 4
+    private val cache = object : LinkedHashMap<String, EpubBook>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, EpubBook>?) = this.size > MAX_BOOKS
+    }
+
+    fun parse(root: File): EpubBook {
+        val key = root.absolutePath + "@" + root.lastModified()
+        synchronized(cache) { cache[key]?.let { return it } }
+        val parsed = EpubParser.parse(root)
+        synchronized(cache) { cache[key] = parsed }
+        return parsed
+    }
+
+    fun invalidate(root: File) = synchronized(cache) {
+        cache.keys.removeAll { it.startsWith(root.absolutePath + "@") }
     }
 }
 

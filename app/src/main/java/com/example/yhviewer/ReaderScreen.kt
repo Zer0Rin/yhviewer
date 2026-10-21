@@ -1,6 +1,8 @@
 package com.example.yhviewer
 
 import android.app.Activity
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -82,11 +84,32 @@ fun ReaderScreen(vm: ShelfViewModel) {
 
     val state = vm.reader
     val doc = (state as? ReaderState.Ready)?.doc
+    if (state is ReaderState.Loading) {
+        // v17：加载期间只显示主题底色，超过 300ms 才出现转圈。以前加载时显示的是单页文档的界面
+        // （顶栏 + 转圈），书加载完突然换成全屏阅读页，布局会跳；加载很快时转圈也会一闪而过
+        ReaderLoading(onBack = vm::backToShelf)
+        return
+    }
     if (doc is OpenedDoc.Txt || doc is OpenedDoc.Epub) {
         val palette = rememberReaderPalette(vm.theme)
         ReaderChromeTheme(palette) { BookReader(vm, doc, palette) }
     } else {
         PageReader(vm, state)
+    }
+}
+
+@Composable
+private fun ReaderLoading(onBack: () -> Unit) {
+    val yh = LocalYH.current
+    var slow by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(Motion.SPINNER_DELAY_MS); slow = true }
+    Box(Modifier.fillMaxSize().background(yh.bg).windowInsetsPadding(WindowInsets.statusBars)) {
+        AnimatedVisibility(visible = slow, enter = fadeIn(Motion.enter()), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
+                TextButton(onClick = onBack, modifier = Modifier.padding(4.dp)) { Text("‹ 书架") }
+                CircularProgressIndicator(Modifier.align(Alignment.Center))
+            }
+        }
     }
 }
 
@@ -124,7 +147,11 @@ private fun PageReader(vm: ShelfViewModel, state: ReaderState) {
     BackHandler(enabled = find.open) { find.open = false; find.lastSearched = null; handle.clearFind() }
 
     GlassBridge(glass, handle)
-    val chromeAlpha by androidx.compose.animation.core.animateFloatAsState(if (sliderDragging) 0f else 1f, tween(160), label = "chrome")
+    val chromeAlpha by androidx.compose.animation.core.animateFloatAsState(
+        if (sliderDragging) 0f else 1f,
+        if (sliderDragging) Motion.exit() else Motion.enter(),
+        label = "chrome",
+    )
     CompositionLocalProvider(LocalGlassHost provides glass) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -259,6 +286,8 @@ private fun SingleContent(
             textZoom = vm.liveDocReading.fontScale.takeIf { !isMarkdown && !(doc.doc.isSvg && !vm.svgSource) },
             onMissingLocal = { if (session == vm.documentSession) vm.reportMissing(it) },
             dialogSource = doc.name,
+            // v17：我们自己的模板用主题底色，新建 WebView 时不白闪；原样 HTML 保持白底
+            background = LocalYH.current.bg.toArgb().takeIf { !isHtml },
         )
     }
 }
@@ -268,7 +297,8 @@ private fun SingleContent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalette) {
-    val titles = chapterTitles(doc)
+    // v17：按书缓存。以前每次重组都重新生成（1415 章就是 1415 项），连续滚动换章时每次都要重建
+    val titles = remember(doc) { chapterTitles(doc) }
     var barsVisible by remember { mutableStateOf(true) }
     var settingsOpen by remember { mutableStateOf(false) }
     // v13：拖动 Aa 里的滑杆时隐去顶栏和底部胶囊；液态玻璃（Glass.kt）
@@ -356,8 +386,8 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             // v16：顶栏也是液态玻璃，和底部胶囊一样只淡入淡出，页面里的模糊区域能和它对齐
             AnimatedVisibility(
                 visible = (barsVisible || find.open) && !sliderDragging,
-                enter = fadeIn(tween(160)),
-                exit = fadeOut(tween(160)),
+                enter = fadeIn(Motion.enter()),
+                exit = fadeOut(Motion.exit()),
                 modifier = Modifier.align(Alignment.TopCenter),
             ) { Column {
                 if (find.open) FindBar(
@@ -395,8 +425,8 @@ private fun BookReader(vm: ShelfViewModel, doc: OpenedDoc, palette: ReaderPalett
             // v13：底部胶囊是液态玻璃，只淡入淡出（不滑动），页面里的模糊区域能和它对齐
             AnimatedVisibility(
                 visible = barsVisible && !sliderDragging,
-                enter = fadeIn(tween(160)),
-                exit = fadeOut(tween(160)),
+                enter = fadeIn(Motion.enter()),
+                exit = fadeOut(Motion.exit()),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 ChapterBar(
@@ -486,6 +516,7 @@ private fun BookContent(
                 onRendererGone = { vm.onRendererGone(session, index) },
                 gestures = gestures,
                 handle = handle,
+                background = LocalYH.current.bg.toArgb(),
                 onPageReady = onPageReady,
                 onPageLoading = onPageLoading,
             ) }
@@ -505,6 +536,7 @@ private fun BookContent(
                 bookReadingCss = { vm.reading.toCss() + if (doc.vertical) EpubInjector.HORIZONTAL_CSS else "" },
                 gestures = gestures,
                 handle = handle,
+                background = LocalYH.current.bg.toArgb(),
                 onPageReady = onPageReady,
                 onPageLoading = onPageLoading,
             )
@@ -566,6 +598,7 @@ private fun FlowContent(
             bookReadingCss = { readingCss },
             gestures = gestures,
             handle = handle,
+            background = LocalYH.current.bg.toArgb(),
             onPageReady = { ticks.trySend(Unit) },
             onPageLoading = onPageLoading,
         )

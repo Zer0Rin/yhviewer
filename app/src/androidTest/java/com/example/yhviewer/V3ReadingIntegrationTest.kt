@@ -73,7 +73,7 @@ class V3ReadingIntegrationTest {
             put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/YHViewerV3Tests")
         })!!
         val text = (1..3).joinToString("\n") { chapter ->
-            "第${chapter}章 阅读\n" + (1..100).joinToString("\n") { "阅读段落 $chapter / $it。正文应该保持相同的阅读位置，并且支持选字和翻页。" }
+            "第${chapter}章 阅读\n" + (1..400).joinToString("\n") { "阅读段落 $chapter / $it。正文应该保持相同的阅读位置，并且支持选字和翻页。" }
         }
         context.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
         created += uri
@@ -148,6 +148,43 @@ class V3ReadingIntegrationTest {
         }
         Thread.sleep(ViewConfiguration.getDoubleTapTimeout() + 200L)
     }
+    private fun quickRightTaps(s: ActivityScenario<MainActivity>, count: Int) {
+        readyView(s)
+        repeat(count) {
+            s.onActivity { a -> web(a.window.decorView)!!.let { target ->
+                val start = android.os.SystemClock.uptimeMillis()
+                val x = target.width * .9f
+                val y = target.height * .5f
+                val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, x, y, 0)
+                target.dispatchTouchEvent(down); down.recycle()
+                val upTime = android.os.SystemClock.uptimeMillis()
+                val up = MotionEvent.obtain(start, upTime, MotionEvent.ACTION_UP, x, y, 0)
+                target.dispatchTouchEvent(up); up.recycle()
+            } }
+            if (it != count - 1) Thread.sleep(20)
+        }
+    }
+    private fun longPressText(s: ActivityScenario<MainActivity>) {
+        val point = org.json.JSONObject(js(s, """(()=>{const p=[...document.querySelectorAll('p')].find(e=>{const r=e.getBoundingClientRect();return r.width>100&&r.height>16&&r.top>40&&r.top<innerHeight-80});if(!p)return null;const r=p.getBoundingClientRect();return JSON.stringify({x:r.left+Math.min(24,r.width/3),y:r.top+Math.min(10,r.height/2)})})()""").let { org.json.JSONTokener(it).nextValue().toString() })
+        readyView(s)
+        var x = 0f
+        var y = 0f
+        s.onActivity { a -> web(a.window.decorView)!!.let { target ->
+            @Suppress("DEPRECATION") val scale = target.scale
+            x = point.getDouble("x").toFloat()*scale
+            y = point.getDouble("y").toFloat()*scale
+            val downAt = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0)
+            target.dispatchTouchEvent(down); down.recycle()
+        } }
+        Thread.sleep(ViewConfiguration.getLongPressTimeout()+250L)
+        s.onActivity { a -> web(a.window.decorView)!!.let { target ->
+            val now = android.os.SystemClock.uptimeMillis()
+            val up = MotionEvent.obtain(now-ViewConfiguration.getLongPressTimeout()-250L, now, MotionEvent.ACTION_UP, x, y, 0)
+            target.dispatchTouchEvent(up); up.recycle()
+        } }
+        Thread.sleep(150)
+    }
     private fun scroll(s: ActivityScenario<MainActivity>, ratio: Float) {
         val view = readyView(s)
         s.onActivity { a ->
@@ -180,17 +217,34 @@ class V3ReadingIntegrationTest {
         }
     }
 
-    @Test fun confirmedTapPagesButDoubleTapAndLongPressDoNotAndPreviousStartsAtEnd() {
+    @Test fun tapPagesImmediatelyRapidTapsAccumulateAndLongPressStillSelects() {
         launch().use { s ->
             ready(s)
             scroll(s, 0f)
-            tap(s, .9f)
-            s.onActivity { a -> web(a.window.decorView)!!.let { assertEquals(it.height*.9f, it.scrollY.toFloat(), 3f) } }
+            var startY = 0
+            s.onActivity { a -> startY = web(a.window.decorView)!!.scrollY }
+            quickRightTaps(s, 1)
+            compose.waitUntil(50) {
+                var moved = false
+                s.onActivity { a -> moved = web(a.window.decorView)!!.scrollY != startY }
+                moved
+            }
+            compose.waitUntil(5_000) {
+                var settled = false
+                s.onActivity { a -> val w = web(a.window.decorView)!!; settled = kotlin.math.abs(w.scrollY - w.height*.9f) < 3 }
+                settled
+            }
             scroll(s, 0f)
-            tap(s, .9f, double=true)
-            s.onActivity { a -> assertEquals(0, web(a.window.decorView)!!.scrollY) }
-            tap(s, .9f, hold=true)
-            s.onActivity { a -> assertEquals(0, web(a.window.decorView)!!.scrollY) }
+            val pageHeight = readyView(s).height
+            quickRightTaps(s, 3)
+            Thread.sleep(500)
+            var actualY = 0
+            var maxY = 0
+            s.onActivity { a -> val w = web(a.window.decorView)!!; actualY = w.scrollY; @Suppress("DEPRECATION") val contentHeight = (w.contentHeight*w.scale).roundToInt(); maxY = (contentHeight-w.height).coerceAtLeast(0) }
+            assertEquals("three quick right taps should accumulate 3 x 0.9 screen heights (max=$maxY)", pageHeight*2.7f, actualY.toFloat(), 2f)
+            scroll(s, 0f)
+            longPressText(s)
+            assertTrue("long press continues to select text", js(s, "String(window.getSelection()).length").toInt() > 0)
             js(s, "window.getSelection().removeAllRanges()")
             s.onActivity { a -> ViewModelProvider(a)[ShelfViewModel::class.java].goToChapter(1) }
             ready(s)
@@ -198,6 +252,13 @@ class V3ReadingIntegrationTest {
             compose.waitUntil(10_000) { var end=false; s.onActivity { a ->
                 end=ViewModelProvider(a)[ShelfViewModel::class.java].chapter==0 && (web(a.window.decorView)?.scrollRatio() ?: 0f)>.97f
             }; end }
+            tap(s, .9f)
+            compose.waitUntil(10_000) {
+                var next = false
+                s.onActivity { a -> next = ViewModelProvider(a)[ShelfViewModel::class.java].chapter == 1 }
+                next
+            }
+            s.onActivity { a -> assertEquals("chapter-end tap advances exactly one chapter", 1, ViewModelProvider(a)[ShelfViewModel::class.java].chapter) }
         }
     }
 

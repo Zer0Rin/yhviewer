@@ -1,6 +1,6 @@
 package com.example.yhviewer
 
-import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -378,6 +378,11 @@ fun HtmlView(
     dialogSource: String = "页面",
     /** v13：文字缩放（百分比）。原样 HTML 和代码用它调字号，不改网页自己的布局 */
     textZoom: Int? = null,
+    /**
+     * v17：页面画出来之前 WebView 自己的底色（ARGB）。不设时是白色：墨色、终端主题下每次新建 WebView
+     * （换章、跳转、打开文档）都会白闪一下。我们自己的模板传主题底色；原样 HTML 不传，保持浏览器默认的白底。
+     */
+    background: Int? = null,
 ) {
     val effective = if (source is PageSource.BookFile || source is PageSource.Flow) DocPermissions.STRICT else AppCapabilities.effective(permissions)
     val sessions = remember { mutableMapOf<WebView, DocProfiles.Session>() }
@@ -402,6 +407,11 @@ fun HtmlView(
     val missing = remember { MissingResourceAccumulator() }
 
     BackHandler(enabled = canGoBack) { webView?.goBack() }
+
+    LaunchedEffect(background, webView) {
+        val view = webView ?: return@LaunchedEffect
+        view.setBackgroundColor(background ?: android.graphics.Color.WHITE)
+    }
 
     LaunchedEffect(textZoom, webView) {
         val view = webView ?: return@LaunchedEffect
@@ -501,6 +511,7 @@ fun HtmlView(
                     // v11：连续滚动的外层页面是我们自己的脚本；章节在沙箱 iframe 里，脚本被 sandbox 和 CSP 双重禁止
                     applySandboxSettings(allowJs = source is PageSource.Flow || (source !is PageSource.BookFile && effective.scripts))
                     textZoom?.let { settings.textZoom = it }
+                    setBackgroundColor(background ?: android.graphics.Color.WHITE)
                     // v10：页面弹窗。不设置 WebChromeClient 时 alert() 会被静默丢弃，用户以为按钮坏了
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         private fun show(req: JsDialogRequest): Boolean {
@@ -599,16 +610,43 @@ class ReaderGestures(
     val onReachStart: () -> Unit,   // 已在本章开头还往前翻 → 上一章末尾
 )
 
-/** 一次翻 90% 屏高：留一点重叠，翻页后还能看到上一屏最后一两行，不会读断 */
-private fun WebView.turnPage(forward: Boolean, g: ReaderGestures) {
-    val step = (height * 0.9f).roundToInt()
-    if (forward) {
-        if (!canScrollVertically(1)) return g.onReachEnd()
-        ObjectAnimator.ofInt(this, "scrollY", scrollY, min(scrollY + step, maxScrollPx())).setDuration(160).start()
-    } else {
-        if (!canScrollVertically(-1)) return g.onReachStart()
-        ObjectAnimator.ofInt(this, "scrollY", scrollY, max(0, scrollY - step)).setDuration(160).start()
+/**
+ * 翻页的目标位置（纯函数，JVM 可测）。一次翻 90% 屏高：留一点重叠，翻页后还能看到上一屏最后一两行。
+ *
+ * v17：base 是"上一次翻页的目标"（动画还没结束时）或当前位置。以前连点时新动画从半路的位置算起，
+ * 两次加起来不到两屏，会重复读几行；现在按上一次的目标累加，连点几下就准确地翻几页。
+ */
+internal object PageTurn {
+    fun step(viewHeight: Int): Int = (viewHeight * 0.9f).roundToInt()
+    fun target(base: Int, step: Int, maxScroll: Int, forward: Boolean): Int =
+        if (forward) min(base + step, maxScroll) else max(base - step, 0)
+}
+
+/** 一个 WebView 的翻页动画：记住目标，连点累加；手指拖动时立刻停下（可被打断） */
+private class PageTurner(private val view: WebView) {
+    private var animator: ValueAnimator? = null
+    private var target = 0
+
+    private val running get() = animator?.isRunning == true
+
+    fun turn(forward: Boolean, g: ReaderGestures) {
+        val maxScroll = view.maxScrollPx()
+        val base = if (running) target else view.scrollY
+        // 已经在（或正在翻向）本章开头 / 结尾：翻到上一章 / 下一章
+        if (forward && base >= maxScroll) { if (!running) g.onReachEnd(); return }
+        if (!forward && base <= 0) { if (!running) g.onReachStart(); return }
+        target = PageTurn.target(base, PageTurn.step(view.height), maxScroll, forward)
+        animator?.cancel()
+        animator = ValueAnimator.ofInt(view.scrollY, target).apply {
+            duration = Motion.PAGE_TURN_MS.toLong()
+            interpolator = Motion.easeOutInterpolator()
+            addUpdateListener { view.scrollTo(view.scrollX, it.animatedValue as Int) }
+            start()
+        }
     }
+
+    /** 手指开始拖动：交给用户，不再和动画抢 */
+    fun interrupt() { animator?.cancel(); animator = null }
 }
 
 
@@ -616,19 +654,27 @@ private fun WebView.turnPage(forward: Boolean, g: ReaderGestures) {
 private fun WebView.installReaderGestures(context: Context, onTouch: () -> Unit, gestures: () -> ReaderGestures?): () -> Unit {
     var active = true
     var tappedLink = false
+    val turner = PageTurner(this)
+    // v17：抬手立刻响应。以前用 onSingleTapConfirmed，系统要等约 300ms 确认不是双击，每次翻页都慢半拍；
+    // 连点两下还会被当成双击，一页都不翻。阅读页不需要双击手势，所以关掉双击识别，每次点按都是单击。
     val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
             if (!active || !isAttachedToWindow || tappedLink) return false
             val g = gestures() ?: return false
             val x = e.x / width.coerceAtLeast(1)
             when {
                 !g.tapToTurn || x in 0.3f..0.7f -> g.onToggleBars()
-                x > 0.7f -> turnPage(forward = true, g = g)
-                else -> turnPage(forward = false, g = g)
+                x > 0.7f -> turner.turn(forward = true, g = g)
+                else -> turner.turn(forward = false, g = g)
             }
             return true
         }
-    })
+
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            turner.interrupt()
+            return false
+        }
+    }).apply { setOnDoubleTapListener(null) }
     setOnTouchListener { _, event ->
         if (event.actionMasked == MotionEvent.ACTION_DOWN) onTouch()
         // Remember the link before WebView navigates; the confirmed callback arrives later.

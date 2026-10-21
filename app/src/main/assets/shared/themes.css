@@ -60,6 +60,10 @@
 
 
     html { background: var(--bg); }
+    /* v17：去掉 Android WebView 点按时的灰蓝色高亮（最像"网页"的信号）；链接改为按下时变淡，抬手 160ms 恢复 */
+    html { -webkit-tap-highlight-color: transparent; }
+    a { transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+    a:active { opacity: .55; transition-duration: 60ms; }
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
 /* ================= 代码高亮：用主题变量着色，不再依赖外部主题 CSS ================= */

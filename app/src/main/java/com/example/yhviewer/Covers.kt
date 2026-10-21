@@ -206,7 +206,10 @@ internal object CoverCache {
 fun rememberCover(store: CoverStore, book: Book): State<ImageBitmap?> {
     val revision = store.revision
     val key = "${store.file(book.id).absolutePath}:$revision:${book.localFile}"
-    return produceState<ImageBitmap?>(initialValue = null, key1 = key, key2 = book.coverChecked) {
+    // v17：已经解码过的封面直接作为初始值。以前初始值总是 null，封面滚出屏幕再滚回来时
+    // 先画一帧文字封面再换成图片，滚动时一直在闪
+    val cached = if (book.type == DocType.EPUB) CoverCache.get(key) else null
+    return produceState(initialValue = cached, key1 = key, key2 = book.coverChecked) {
         if (book.type != DocType.EPUB) { value = null; return@produceState }
         value = CoverCache.get(key) ?: withContext(Dispatchers.IO) {
             val f = store.file(book.id)
