@@ -94,7 +94,10 @@ class ReadingPrefsStore(
 
     companion object {
         const val DOC_PREFIX = "doc_"
-        /** Markdown 模板原本的排版：17px、行距 1.75、左右 18px */
-        val DOC_DEFAULTS = ReadingPrefs(lineHeight = 1.75f, margin = 18)
+        /**
+         * Markdown 的默认排版：17px、行距 1.8、左右 20px。
+         * v1.0：默认值必须落在滑杆的刻度上（行距每格 0.1、页边距每格 4），以前的 1.75 / 18 拖动过一次就回不去了。
+         */
+        val DOC_DEFAULTS = ReadingPrefs(lineHeight = 1.8f, margin = 20)
     }
 }
