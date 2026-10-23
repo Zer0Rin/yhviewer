@@ -114,7 +114,11 @@
       var t = targetY(s, ratio, anchor);
       window.scrollTo(0, reachable(s, t.y));
       lastJump = t.padded ? { i: i, ratio: ratio, anchor: anchor, rel: window.scrollY - top(s), at: Date.now() } : null;
+      note('jump', { i: i, y: t.y, at: window.scrollY, pad: topPad(), seen: glassSeen });
     }
+    // 诊断：最近 24 个和落点有关的事件，仪器测试失败时通过 YH.debug() 读出（只有数字，不含正文）
+    var trace = [];
+    function note(kind, data) { trace.push([Date.now() % 100000, kind, data]); if (trace.length > 24) trace.shift(); }
     // 落点在目标章上方、而那一段（前一章）还没加载好时，先停在目标章章首，等它加载完再对齐：
     // 停在没加载的章节里，补偿滚动会以那一章为基准，落点就丢了
     function reachable(s, y) {
@@ -136,7 +140,10 @@
       if (!j) return;
       var js = find(j.i);
       var expired = !firstBar && glassSeen && Date.now() - j.at > 3000;
-      if (!js || expired || Math.abs(window.scrollY - top(js) - j.rel) >= 2) { lastJump = null; return; }
+      if (!js || expired || Math.abs(window.scrollY - top(js) - j.rel) >= 2) {
+        note('drop', { found: !!js, expired: expired, rel: js ? window.scrollY - top(js) : null, want: j.rel });
+        lastJump = null; return;
+      }
       var y = reachable(js, targetY(js, j.ratio, j.anchor).y);
       if (Math.abs(window.scrollY - y) >= 0.5) window.scrollTo(0, y);
       j.rel = window.scrollY - top(js);
@@ -412,6 +419,7 @@
       var firstBar = !glassSeen;
       glassSeen = true;
       barPad = barFrom(rects);
+      note('glass', { pad: barPad, first: firstBar, n: rects.length });
       settleJump(firstBar);   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
@@ -440,6 +448,7 @@
       },
       hold: function (on) { hold = !!on; wake(); if (!hold) fill(); },
       takeLink: function () { var link = pendingLink; pendingLink = ''; return link; },
+      debug: function () { return JSON.stringify({ seen: glassSeen, pad: barPad, y: window.scrollY, jump: lastJump && { i: lastJump.i, rel: lastJump.rel }, trace: trace }); },
     };
 
     window.addEventListener('scroll', function () {

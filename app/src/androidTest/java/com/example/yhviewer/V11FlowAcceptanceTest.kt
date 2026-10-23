@@ -53,6 +53,10 @@ class V11FlowAcceptanceTest {
     private lateinit var fixtures: V11GeneratedFixtures
     private lateinit var oldReading: ReadingPrefs
     private var oldTheme: String? = null
+    private var oldImmersiveConfirmations = ""
+    private fun shell(command: String): String = instrumentation.uiAutomation.executeShellCommand(command).use {
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().use { reader -> reader.readText().trim() }
+    }
 
     @Before fun setup() {
         fixtures = V11GeneratedFixtures(context)
@@ -60,11 +64,17 @@ class V11FlowAcceptanceTest {
         oldTheme = context.getSharedPreferences("reader_prefs", 0).getString("md_theme", null)
         ReadingPrefsStore(context).save(ReadingPrefs(continuous = true))
         context.getSharedPreferences("reader_prefs", 0).edit().putString("md_theme", "paper").commit()
+        // Hiding the toolbar enters immersive mode; the system's one-time "viewing full screen" hint
+        // is a System UI window, and a native tap landing on it is rejected for another uid.
+        oldImmersiveConfirmations = shell("settings get secure immersive_mode_confirmations")
+        shell("settings put secure immersive_mode_confirmations confirmed")
     }
     @After fun cleanup() {
         try { runBlocking { fixtures.clean() } }
         finally {
             ReadingPrefsStore(context).save(oldReading)
+            if (oldImmersiveConfirmations.isEmpty() || oldImmersiveConfirmations == "null") shell("settings delete secure immersive_mode_confirmations")
+            else shell("settings put secure immersive_mode_confirmations $oldImmersiveConfirmations")
             context.getSharedPreferences("reader_prefs", 0).edit().apply {
                 oldTheme?.let { putString("md_theme", it) } ?: remove("md_theme")
             }.commit()
@@ -752,7 +762,7 @@ class V11FlowAcceptanceTest {
             val offset = js(s, "(()=>{const f=document.querySelector('[data-ch=\"7\"] iframe');return f.getBoundingClientRect().top+f.contentDocument.getElementById('p12').getBoundingClientRect().top})()").toDouble()
             // The visible glass top bar, as registered with the page; 0 when the toolbar is hidden.
             val edge = barEdge(s)
-            assertEquals("Native anchor lands just below the top-bar edge (bar=$edge)", edge, offset, 2.0)
+            assertEquals("Native anchor lands just below the top-bar edge (bar=$edge debug=${string(s, "YH.debug()")})", edge, offset, 2.0)
         }
     }
     @Test fun epubScriptsRefreshAndNativeTopLinkCannotEscapeFlowShell() {
