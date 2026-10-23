@@ -32,6 +32,8 @@ class V1Fix4Test {
         assertTrue(f.contains("var probe = window.scrollY + topPad() + 0.5"))
         assertTrue(f.contains("var pad = r === 0 ? topPad() : 0;"))
         assertTrue(f.contains("function settleJump()"))
+        // FIX6：图片加载等补偿以同一条线上的章节为基准
+        assertTrue(f.contains("if (y < t + s.el.offsetHeight) return { s: s, off: window.scrollY - t };"))
         // 行为本身由 scripts/test-flow-shell.cjs 的 top-bar chapter line 断言覆盖
         assertTrue(File("../scripts/test-flow-shell.cjs").readText().contains("top-bar chapter line"))
     }

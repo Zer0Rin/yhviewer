@@ -64,11 +64,14 @@
     }
 
     // 视口顶部所在的章节，和视口顶部在它里面的偏移
+    // 1.0 FIX6：用和 current() 同一条线（顶栏下沿）找基准章节。跳到章首后视口顶端落在上一章末尾（顶栏后面），
+    // 以前按视口顶端找，基准成了上一章；上一章的图片加载完变高时，补偿以它为准，目标章被整个推下去
+    // （F4 跳第 3 章，第 2 章大图加载后停在第 2 章）。真机上即使没有顶栏留白，亚像素误差也会落进上一章。
     function anchorAt() {
-      var y = window.scrollY;
+      var y = window.scrollY + topPad() + 0.5;
       for (var k = 0; k < secs.length; k++) {
         var s = secs[k], t = top(s);
-        if (y < t + s.el.offsetHeight) return { s: s, off: y - t };
+        if (y < t + s.el.offsetHeight) return { s: s, off: window.scrollY - t };
       }
       return null;
     }

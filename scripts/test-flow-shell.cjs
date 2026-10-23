@@ -226,6 +226,15 @@ for (const y of [900, 1500, 1700, 2500]) {
   const lateFrame = late.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
   assert(Math.abs(lateFrame.offsetTop - late.window.scrollY - BAR) < .001, 'late bar realigns the chapter-start jump');
   assert.deepEqual(late.state(), [3, 0]);
+  // 1.0 FIX6: the chapter above grows after the jump (late image) while the viewport top sits
+  // in its tail behind the bar; compensation must keep the target chapter under the bar.
+  for (const bar of [BAR, 0]) {
+    const g = shell([1600, 300, 250], 2, 0, '/txt/{i}.html', true, bar);
+    g.heights[1] = 2300; g.tick(); g.tick();
+    const gf = g.flow.children.find(e => Number(e.attrs['data-ch']) === 2);
+    assert(Math.abs(gf.offsetTop - g.window.scrollY - bar) < .001, `growing previous chapter keeps the target (bar ${bar})`);
+    assert.equal(g.state()[0], 2, `target chapter still current after growth (bar ${bar})`);
+  }
   // Mid-chapter progress is not shifted by the bar.
   const mid = shell(Array(8).fill(1600), 4, .5, '/txt/{i}.html', true, BAR);
   const midFrame = mid.flow.children.find(e => Number(e.attrs['data-ch']) === 4);
