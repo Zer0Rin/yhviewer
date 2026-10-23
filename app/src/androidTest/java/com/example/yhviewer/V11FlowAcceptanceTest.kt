@@ -472,6 +472,7 @@ class V11FlowAcceptanceTest {
         runBlocking { repo.savePosition(id, Locator(6, .4f), 12) }
         launch().use { s ->
             open(s, id)
+            awaitInitialStyle(s, "6")
             js(s, "YH.hold(true);window.scrollTo(0,document.querySelector('[data-ch=\"6\"]').offsetTop+40)")
             val before = anchor(s)
             val beforeGeometry = geometry(s)
@@ -679,6 +680,24 @@ class V11FlowAcceptanceTest {
         val size = JSONObject(string(s, "JSON.stringify({w:innerWidth,h:innerHeight})"))
         tapRenderedWebViewPoint(instrumentation, view(s), size.getDouble("w").toFloat() / 2, size.getDouble("h").toFloat() / 2)
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Aa").fetchSemanticsNodes().isEmpty() && barEdge(s) == 0.0 }
+    }
+    /**
+     * Native pushes the reading CSS right after the page loads; the shell's first setReading()
+     * captures the current position and restores it two frames later. Scrolling inside that
+     * window was undone (CI: back to the saved 6/0.4 within 0.5 s of opening). Wait for the
+     * style to be applied and the reported position to stay put before the test scrolls.
+     */
+    private fun awaitInitialStyle(s: ActivityScenario<MainActivity>, chapter: String) {
+        var previous = ""
+        var stableSamples = 0
+        compose.waitUntil(10_000) {
+            val styled = js(s, "(()=>{const d=document.querySelector('[data-ch=\"$chapter\"] iframe')?.contentDocument;return !!d&&!!d.getElementById('yh-reading')?.textContent})()") == "true"
+            val current = string(s, "YH.state()")
+            stableSamples = if (styled && current.isNotEmpty() && current == previous) stableSamples + 1 else 0
+            previous = current
+            if (stableSamples < 2) SystemClock.sleep(100)
+            stableSamples >= 2
+        }
     }
     /** Section geometry for failure messages: which chapters exist, where, and how tall. */
     private fun geometry(s: ActivityScenario<MainActivity>): String = string(s, """
