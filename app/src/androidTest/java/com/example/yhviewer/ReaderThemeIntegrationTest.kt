@@ -124,7 +124,10 @@ class ReaderThemeIntegrationTest {
     }
     private fun select(label: String) {
         compose.onNodeWithText("Aa").performClick()
-        compose.onNode(hasText(label, substring = true)).performClick()
+        // Theme chips live in a horizontally scrolling row (see V2ReaderIntegrationTest.select).
+        // Clicking an off-screen chip used to miss, dismiss the sheet, and the following Back then
+        // left the reader entirely (diagnostics showed DOM=null / native=null).
+        compose.onNode(hasText(label, substring = true)).performScrollTo().assertIsDisplayed().performClick()
         androidx.test.espresso.Espresso.pressBack()
     }
     private fun theme(scenario: ActivityScenario<MainActivity>, id: String) = waitJs(scenario,

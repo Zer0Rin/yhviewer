@@ -425,6 +425,24 @@ class V11FlowAcceptanceTest {
             if(ft+r.bottom>2 && ft+r.top<innerHeight) return {text:p.textContent,offset:ft+r.top}; }
         } return {text:'',offset:0};})())
     """.trimIndent()))
+    /**
+     * The prepended chapter is measured asynchronously: "offsetHeight>0" can be seen before its
+     * final height and the matching compensation. Sample until that chapter is fully measured
+     * and the visible paragraph is unchanged across two polls; the anchor assertion itself is unchanged.
+     */
+    private fun settledAnchor(s: ActivityScenario<MainActivity>, chapter: String): JSONObject {
+        var previous = ""
+        var settled: JSONObject? = null
+        compose.waitUntil(10_000) {
+            val fitted = js(s, "(()=>{const f=document.querySelector('[data-ch=\"$chapter\"] iframe');return !!f&&!!f.contentDocument?.body&&f.offsetHeight>=f.contentDocument.body.scrollHeight})()") == "true"
+            val sample = anchor(s)
+            val stable = fitted && sample.toString() == previous
+            previous = sample.toString()
+            if (stable) settled = sample
+            stable
+        }
+        return checkNotNull(settled)
+    }
     private fun assertAnchor(before: JSONObject, after: JSONObject) {
         assertTrue("A visible book paragraph was captured", before.getString("text").isNotBlank())
         assertEquals("Visible text stays anchored", before.getString("text"), after.getString("text"))
@@ -459,13 +477,13 @@ class V11FlowAcceptanceTest {
             val previous = frames(s).toString()
             js(s, "YH.hold(false)")
             compose.waitUntil(15_000) { frames(s).toString() != previous && js(s, "!!document.querySelector('[data-ch=\"5\"] iframe') && document.querySelector('[data-ch=\"5\"] iframe').offsetHeight>0") == "true" }
-            assertAnchor(before, anchor(s))
+            assertAnchor(before, settledAnchor(s, "5"))
             js(s, "YH.hold(true)")
             val beforeGrowth = anchor(s)
             // Trusted test-only DOM manipulation models an image whose dimensions resolve late.
             js(s, """(()=>{const d=document.querySelector('[data-ch="5"] iframe').contentDocument;const img=d.createElement('img');img.id='late-test-image';img.alt='';img.style.cssText='display:block;width:100px;height:900px';d.body.prepend(img);})()""")
             compose.waitUntil(10_000) { js(s, "document.querySelector('[data-ch=\"5\"] iframe').offsetHeight >= document.querySelector('[data-ch=\"5\"] iframe').contentDocument.body.scrollHeight") == "true" }
-            assertAnchor(beforeGrowth, anchor(s))
+            assertAnchor(beforeGrowth, settledAnchor(s, "5"))
             bounded(s)
         }
     }
@@ -530,7 +548,7 @@ class V11FlowAcceptanceTest {
             model(s) { assertEquals(120, it.reading.fontScale) }
             compose.onNodeWithText("Aa").performClick()
             compose.onNodeWithText("章节连续滚动").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithContentDescription("章节连续滚动").performClick()
+            switchInRow("章节连续滚动").performClick()
             Espresso.pressBack()
             compose.waitUntil(15_000) { runCatching { url(s)?.endsWith("/doc/index.html") == true }.getOrDefault(false) }
             assertNotSame("Changing architecture creates chapter WebView", original, view(s))
@@ -648,10 +666,18 @@ class V11FlowAcceptanceTest {
         }
     }
 
+    /** The settings rows are a Text plus an unlabeled Switch; pick the Switch on the same line as [label]. */
+    private fun switchInRow(label: String): SemanticsNodeInteraction {
+        val row = compose.onNodeWithText(label).performScrollTo().fetchSemanticsNode().boundsInRoot
+        val switches = compose.onAllNodes(isToggleable())
+        val index = switches.fetchSemanticsNodes().indexOfFirst { it.boundsInRoot.top < row.bottom && it.boundsInRoot.bottom > row.top }
+        assertTrue("A switch shares the row of $label", index >= 0)
+        return switches[index]
+    }
     /** Dispatch a native WebView touch; JS only locates the real book link. */
     private fun clickLink(s: ActivityScenario<MainActivity>, id: String) {
         val targetFrame = "[...document.querySelectorAll('iframe')].find(f=>f.contentDocument?.getElementById('$id'))"
-        js(s, """(()=>{const f=$targetFrame;const a=f.contentDocument.getElementById('$id');window.scrollTo(0,f.parentElement.offsetTop+a.getBoundingClientRect().top-80)})()""")
+        js(s, """(()=>{const f=$targetFrame;const a=f.contentDocument.getElementById('$id');window.scrollTo(0,f.parentElement.offsetTop+a.getBoundingClientRect().top-Math.round(innerHeight*.45))})()""")
         var point: JSONObject? = null
         var previous = ""
         compose.waitUntil(15_000) {
@@ -682,7 +708,9 @@ class V11FlowAcceptanceTest {
             ready(s, 7)
             assertEquals(7, state(s).first)
             val offset = js(s, "(()=>{const f=document.querySelector('[data-ch=\"7\"] iframe');return f.getBoundingClientRect().top+f.contentDocument.getElementById('p12').getBoundingClientRect().top})()").toDouble()
-            assertEquals("Native anchor lands at outer viewport top", 0.0, offset, 4.0)
+            // The visible glass top bar, as registered with the page; 0 when the toolbar is hidden.
+            val barEdge = js(s, "[...(document.getElementById('yh-glass')?.children||[])].filter(d=>d.style.opacity==='1').map(d=>d.getBoundingClientRect()).filter(r=>r.top<=2&&r.width>=innerWidth*.9).reduce((m,r)=>Math.max(m,r.bottom),0)").toDouble()
+            assertEquals("Native anchor lands just below the top-bar edge (bar=$barEdge)", barEdge, offset, 2.0)
         }
     }
     @Test fun epubScriptsRefreshAndNativeTopLinkCannotEscapeFlowShell() {
