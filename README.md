@@ -33,7 +33,7 @@ Screenshots are native API 37 emulator captures of curated fictional documents. 
 |---|---|
 | ![](docs/screenshots/v08-continuous-boundary.png) | ![](docs/screenshots/v08-toc-fast-scroll.png) |
 
-**[Download APKs](https://github.com/Zer0Rin/yhviewer/releases)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.7 verification](docs/verification/V07_VERIFICATION.md), [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
+**[Download v1.0.0 APKs](https://github.com/Zer0Rin/yhviewer/releases/tag/v1.0.0)**: the tag-triggered workflow builds signed Strict and Standard R8 APKs, checks their final permissions and smoke-tests startup before publishing. See [v0.7 verification](docs/verification/V07_VERIFICATION.md), [v0.5 verification](docs/verification/V05_VERIFICATION.md), [RELEASE.md](RELEASE.md), [release preparation](docs/verification/RELEASE_PREPARATION.md) and [API 35 device acceptance](docs/verification/RELEASE_DEVICE_ACCEPTANCE.md).
 
 ---
 
@@ -187,7 +187,7 @@ flowchart TB
 |---|---|---|
 | **Copy on import** | "Open with" URIs carry temporary grants that expire after a restart. A private copy keeps the shelf readable offline | The copy doesn't follow source edits; reopening the source refreshes it |
 | **Re-import as an atomic swap** | Write the new copy under a fresh name, update the row in a transaction, then delete the old copy. A crash at any step never leaves a row pointing to a half-written file | Briefly uses twice the space |
-| **Detect encoding once** | TXT is decoded at import (BOM → strict UTF-8 → GB18030 → Big5) and stored as UTF-8, so opening never guesses again | Big5 text can occasionally be misread as GB18030 |
+| **Detect encoding once** | TXT is decoded at import (BOM → strict UTF-8 → GB18030 / Big5 / UTF-16 scoring) and stored as UTF-8, so opening never guesses again | Big5 text can occasionally be misread as GB18030 |
 | **Position = chapter + ratio** | Pixel offsets break when the theme, font or orientation changes; a ratio survives all three | Approximate within very long chapters |
 | **Debounced saves + flush on stop** | Scrolling writes nothing until it settles for 0.8 s; leaving the reader or backgrounding the app saves immediately | — |
 | **One chapter per page** | A multi-MB novel in a single DOM is slow; chapters keep pages small. Code files use `content-visibility` chunks to reduce layout/paint work; all line nodes still exist | — |
@@ -195,6 +195,8 @@ flowchart TB
 | **Block CDNs by default** | Safe default for untrusted files | Standard edition can explicitly permit the supported CDNs per HTML file |
 
 ## Testing
+
+Follow the [testing plan](docs/testing/TEST-PLAN.md) for change-based checks, required pre-merge L2 instrumentation and the release-only L3 device checklist. It supersedes the one-time 1.0 `DEVICE-TEST-PLAN.md`.
 
 The suite includes JVM policy/template tests and native database, navigation, reading and WebView integration tests. Both editions run in CI. CI runs the device suite on **API 34**; local acceptance uses **API 37**. The v0.2.0 officially signed R8 build was also smoke-tested on a physical **API 35** device. Editor/lifecycle, native CJK input and real Python checks also passed on API 35 using a separate QA app and generated documents. The user then upgraded the official app with the signed Standard candidate and confirmed all eight existing shelf records and reading progress were retained. Reports and debug APKs are retained as CI artifacts for 14 days.
 
@@ -258,7 +260,7 @@ Text imports are capped at 20 MiB (HTML/Markdown/code), TXT at 32 MiB and compre
 - [x] Standard-only offline Python execution
 - [x] Explicit JavaScript execution sandbox
 - [x] Per-document permissions and Strict / Standard editions
-- [ ] **Folder access** (`OpenDocumentTree`) for HTML that references relative images and CSS
+- [x] **Folder access** (`OpenDocumentTree`) for importing HTML with relative images and CSS
 - [ ] Statistical charset detection (e.g. ICU) to tell Big5 from GB18030 reliably
 - [ ] Optional KaTeX / Mermaid modules (kept out of the core to stay lightweight)
 - [x] Font size, line height, margins and immersive controls for books
