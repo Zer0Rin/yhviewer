@@ -9,6 +9,8 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![Editions](https://img.shields.io/badge/editions-Strict%20%2F%20Standard-blue)
 
+**v1.0.0** brings sandboxed HTML, Markdown, code, TXT and EPUB reading in Strict and Standard editions, continuous chapters, large-TXT indexing, import and shelf tools, live layout controls, and editing and script execution. See [release notes](docs/releases/v1.0.0.md) and [device acceptance](docs/verification/V1_DEVICE_ACCEPTANCE.md).
+
 **v0.8.0** adds byte-indexed TXT opening, default continuous TXT/EPUB chapters, live reading layout controls and a draggable TOC fast scroller. Aa retains the single-chapter option. Large-TXT heading matching uses bounded line windows while preserving legacy chapter semantics. See [release notes](docs/releases/v0.8.0.md), [verification](docs/verification/V08_VERIFICATION.md) and [v0.8.0 downloads](https://github.com/Zer0Rin/yhviewer/releases/tag/v0.8.0).
 
 **v0.7.0** adds multiple-file and folder import, in-page/full-book search, bookmarks, footnotes and SVG preview. It retains the vector eye-and-V launcher icon and unifies paper, ink and terminal themes across the shelf, reader and editor, with a three-column cover grid, dotted reading progress and floating action capsules. Shelf groups, multi-selection, content filters, author search, EPUB covers and a chapter drawer remain available. It includes Strict and Standard editions. Strict stays offline; Standard adds explicit per-document network grants and bundled Python.
