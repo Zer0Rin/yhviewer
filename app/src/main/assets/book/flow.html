@@ -95,11 +95,30 @@
       if (!s) return;
       var span = Math.max(0, s.h - vh()), r = Math.max(0, ratio || 0);
       var y = top(s) + span * Math.min(1, r) + Math.max(0, r - 1) * Math.max(1, span);
+      anchorJump = null;
       if (anchor) {
         var d = doc(s), el = d && (d.getElementById(anchor) || d.getElementsByName(anchor)[0]);
-        if (el) y = top(s) + el.getBoundingClientRect().top;
+        // 1.0 FIX4：顶栏盖在正文上面（液态玻璃），锚点要停在顶栏下方，否则脚注被顶栏挡住
+        if (el) {
+          y = Math.max(0, top(s) + el.getBoundingClientRect().top - topPad());
+          anchorJump = { el: el, y: y, at: Date.now() };
+        }
       }
       window.scrollTo(0, Math.max(0, y));
+    }
+
+    // 顶栏下沿（CSS px）。从 yhGlass 收到的区域里取：贴着页面顶端、几乎整宽的那块就是顶栏。
+    // 还没收到过任何区域时先按常见顶栏高度估计；收到过但没有顶栏 = 工具栏已隐藏，不留空。
+    var barPad = 0, glassSeen = false, anchorJump = null;
+    var BAR_GUESS = 96;
+    function topPad() { return glassSeen ? barPad : BAR_GUESS; }
+    function barFrom(rects) {
+      var w = window.innerWidth || document.documentElement.clientWidth, pad = 0;
+      rects.forEach(function (r) {
+        var y = +r.y || 0, h = +r.h || 0;
+        if (h > 0 && y <= 2 && y + h > 0 && (+r.w || 0) >= w * 0.9) pad = Math.max(pad, y + h);
+      });
+      return pad;
     }
 
     // 量高度。shrink：先压到 0 再量（字号变小后章节会变短）；量的时候用 minHeight 撑住页面，
@@ -327,6 +346,20 @@
         document.documentElement.appendChild(host);
       }
       rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      // 刚跳到锚点（1.5 秒内）、用户还没动过时，顶栏高度变了（第一次拿到真实高度、
+      // 顶栏区域晚一步登记）就按新高度再对齐一次
+      var oldPad = topPad();
+      glassSeen = true;
+      barPad = barFrom(rects);
+      var j = anchorJump;
+      if (j && barPad !== oldPad && Date.now() - j.at < 1500 && j.el.isConnected && Math.abs(window.scrollY - j.y) < 2) {
+        var sec = null;
+        for (var k = 0; k < secs.length; k++) if (doc(secs[k]) === j.el.ownerDocument) sec = secs[k];
+        if (sec) {
+          j.y = Math.max(0, top(sec) + j.el.getBoundingClientRect().top - barPad);
+          window.scrollTo(0, j.y);
+        }
+      }
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
         d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);' +
