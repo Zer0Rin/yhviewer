@@ -129,11 +129,14 @@
     // - 刚跳转时只有目标章，章首上方没有内容可滚，留不出顶栏的位置；前一章补进来后再对齐；
     // - 顶栏的真实高度晚一步到（先按估计值跳）。
     // "用户没动"按相对目标章的位置判断，补章、补偿滚动不算用户滚动。
-    function settleJump() {
+    // 1.0.1：真实顶栏高度第一次到达之前，跳转不过期（慢设备上它可能 3 秒后才到，落点会一直停在估计值上）。
+    // firstBar：这次调用就是第一次拿到真实高度，不看时间。
+    function settleJump(firstBar) {
       var j = lastJump;
       if (!j) return;
       var js = find(j.i);
-      if (!js || Date.now() - j.at > 3000 || Math.abs(window.scrollY - top(js) - j.rel) >= 2) { lastJump = null; return; }
+      var expired = !firstBar && glassSeen && Date.now() - j.at > 3000;
+      if (!js || expired || Math.abs(window.scrollY - top(js) - j.rel) >= 2) { lastJump = null; return; }
       var y = reachable(js, targetY(js, j.ratio, j.anchor).y);
       if (Math.abs(window.scrollY - y) >= 0.5) window.scrollTo(0, y);
       j.rel = window.scrollY - top(js);
@@ -406,9 +409,10 @@
         document.documentElement.appendChild(host);
       }
       rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      var firstBar = !glassSeen;
       glassSeen = true;
       barPad = barFrom(rects);
-      settleJump();   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
+      settleJump(firstBar);   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
         d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);' +
