@@ -40,7 +40,12 @@ class V13GlassTest {
 
     @Test fun docDefaultsMatchMarkdownTemplate() {
         assertEquals(100, ReadingPrefsStore.DOC_DEFAULTS.fontScale)
-        assertEquals(1.75f, ReadingPrefsStore.DOC_DEFAULTS.lineHeight, 0f)
-        assertEquals(18, ReadingPrefsStore.DOC_DEFAULTS.margin)
+        assertEquals(1.8f, ReadingPrefsStore.DOC_DEFAULTS.lineHeight, 0f)
+        assertEquals(20, ReadingPrefsStore.DOC_DEFAULTS.margin)
+        // 默认值要能用滑杆拖回来：落在刻度上
+        val line = ReadingPrefsStore.DOC_DEFAULTS.lineHeight
+        assertEquals(0.0, ((line - ReadingPrefs.MIN_LINE) * 10 - Math.round((line - ReadingPrefs.MIN_LINE) * 10)).toDouble(), 1e-4)
+        assertEquals(0, (ReadingPrefsStore.DOC_DEFAULTS.margin - ReadingPrefs.MIN_MARGIN) % 4)
+        assertEquals(0, (ReadingPrefsStore.DOC_DEFAULTS.fontScale - ReadingPrefs.MIN_SCALE) % 10)
     }
 }

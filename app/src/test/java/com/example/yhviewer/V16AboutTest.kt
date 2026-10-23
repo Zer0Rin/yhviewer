@@ -10,7 +10,9 @@ import java.io.File
 class V16AboutTest {
     @Test fun versionLineNamesTheEdition() {
         assertEquals("版本 0.9.0 · Strict 版", AboutInfo.versionLine("0.9.0", "strict"))
+        assertEquals("版本 0.9.0 · Strict 版", AboutInfo.versionLine("0.9.0", "strictRc"))
         assertEquals("版本 0.9.0 · Standard 版", AboutInfo.versionLine("0.9.0", "standard"))
+        assertEquals("版本 0.9.0 · Standard 版", AboutInfo.versionLine("0.9.0", "standardRc"))
         assertEquals("版本 0.9.0", AboutInfo.versionLine("0.9.0", ""))
     }
 

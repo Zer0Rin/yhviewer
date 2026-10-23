@@ -133,15 +133,34 @@
       // Flex rows with no text are omitted by WebView's default copied selection.
       // Rebuild selected cells from a cloned range to retain blank lines and partial endpoints,
       // while excluding gutter nodes. Other page selections keep normal browser behavior.
-      codeEl.addEventListener('copy', function (event) {
-        var selection = window.getSelection();
-        if (!event.clipboardData || !selection || !selection.rangeCount) return;
-        var range = selection.getRangeAt(0);
-        if (!codeEl.contains(range.startContainer) || !codeEl.contains(range.endContainer)) return;
+      // 1.0 FIX4：监听挂在 document 上。Android 的选字工具栏点"复制"时 WebView 会失去焦点，
+      // Chromium 这时把 copy 事件发给 <html> 而不是选区所在元素，挂在 #code 上收不到，空行就丢了。
+      // 选区跨出代码区（全选）时，代码区内仍按行重建，上方的语言、行数信息照常带上。
+      function codeText(range) {
         var cells = range.cloneContents().querySelectorAll('.t');
         var parts = [];
         for (var c = 0; c < cells.length; c++) parts.push(cells[c].textContent);
-        event.clipboardData.setData('text/plain', cells.length ? parts.join('\n') : range.toString());
+        return cells.length ? parts.join('\n') : range.toString();
+      }
+      document.addEventListener('copy', function (event) {
+        var selection = window.getSelection();
+        if (!event.clipboardData || !selection || !selection.rangeCount) return;
+        var range = selection.getRangeAt(0);
+        if (range.collapsed || !range.intersectsNode(codeEl)) return;
+        var startIn = codeEl.contains(range.startContainer), endIn = codeEl.contains(range.endContainer);
+        var out = [];
+        // 代码区上方只有语言、行数那一行；代码区下方没有可见内容（脚本不复制）
+        var metaEl = document.getElementById('meta');
+        if (!startIn && metaEl && range.intersectsNode(metaEl)) {
+          var tags = [];
+          for (var m = 0; m < metaEl.children.length; m++) tags.push(metaEl.children[m].textContent);
+          if (tags.length) out.push(tags.join(' · '));
+        }
+        var inner = range.cloneRange();
+        if (!startIn) inner.setStart(codeEl, 0);
+        if (!endIn) inner.setEnd(codeEl, codeEl.childNodes.length);
+        out.push(codeText(inner));
+        event.clipboardData.setData('text/plain', out.join('\n'));
         event.preventDefault();
       });
       window.setWrap(p.wrap);

@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync(process.env.FLOW_SHELL_PATH || 'app/src/main/assets/book/flow.html', 'utf8');
 const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].at(-1)[1];
-function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeHandshake = true) {
+// bar: native top-bar height in CSS px reported through yhGlass before load (0 = toolbar hidden / immersive).
+function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeHandshake = true, bar = 0) {
   const jobs = [], intervals = [], events = {}, seen = new Set();
   const baseHeights = heights.slice();
   let requests = 0, maxFrames = 0;
@@ -67,17 +68,18 @@ function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeH
   body.appendChild(flow); body.appendChild(continuation);
   function checkFrames() { const n = flow?.children?.length || 0; maxFrames = Math.max(maxFrames, n); assert(n <= 5, `frame cap ${n}`); }
   const document = {
-    documentElement: { get scrollHeight() { return Math.max(800, body.offsetHeight); }, clientHeight: 800, getAttribute: () => 'paper', setAttribute() {} },
+    documentElement: { get scrollHeight() { return Math.max(800, body.offsetHeight); }, clientHeight: 800, clientWidth: 400, getAttribute: () => 'paper', setAttribute() {}, appendChild() {} },
     getElementById: id => id === 'payload' ? { textContent: JSON.stringify({ count: heights.length, start, ratio, pattern }) } : id === 'flow' ? flow : continuation,
     createElement: tag => new El(tag)
   };
-  const window = { innerHeight: 800, scrollY: 0, location: { origin: 'https://appassets.androidplatform.net' },
+  const window = { innerHeight: 800, innerWidth: 400, scrollY: 0, location: { origin: 'https://appassets.androidplatform.net' },
     scrollTo(x, y) { const next = Math.max(0, Math.min(y, document.documentElement.scrollHeight - 800)); if (next !== this.scrollY) { this.scrollY = next; jobs.push(() => events.scroll?.()); } },
     addEventListener: (name, fn) => { events[name] = fn; }
   };
   vm.runInNewContext(script, { document, window, URL, requestAnimationFrame: fn => jobs.push(fn), setInterval: fn => intervals.push(fn) });
   function pump() { let n = 0; while (jobs.length) { assert(++n < 1000, 'unbounded load/evict loop'); jobs.shift()(); } checkFrames(); }
   function tick() { intervals.forEach(fn => fn()); pump(); }
+  if (bar !== null) window.yhGlass(bar ? [{ x: 0, y: 0, w: 400, h: bar, r: 0 }] : []);
   pump(); tick();
   if (nativeHandshake) { window.YH.hold(false); tick(); }
   return { window, flow, start, seen, heights, tick, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
@@ -202,4 +204,40 @@ for (const y of [900, 1500, 1700, 2500]) {
   assert.equal(s.state()[0], chapter);
   assert(Math.abs((s.window.scrollY - after.offsetTop) / s.heights[chapter] - fraction) < .0001, `font anchor ${y}`);
 }
-console.log('PASS actual flow shell: trusted/blocked links, one-shot consume, tiny forward/backward, bounded/stable frames, boundary/live/reopen offsets');
+// 1.0 FIX5: with the top bar shown, a chapter-start jump puts the chapter top at the bar's
+// lower edge and reports that chapter; the chapter line follows the bar edge, tolerating
+// WebView's sub-pixel snapping below a chapter top.
+{
+  const BAR = 92;
+  for (const chapter of [1, 2, 5]) {
+    const s = shell(Array(8).fill(1600), chapter, 0, '/txt/{i}.html', true, BAR);
+    const frame = s.flow.children.find(e => Number(e.attrs['data-ch']) === chapter);
+    assert(Math.abs(frame.offsetTop - s.window.scrollY - BAR) < .001, `chapter ${chapter} top sits under the bar`);
+    assert.deepEqual(s.state(), [chapter, 0], `chapter-start jump reports chapter ${chapter}`);
+    s.scroll(frame.offsetTop - BAR - .3);
+    assert.equal(s.state()[0], chapter, 'sub-pixel snap above the chapter line keeps the target chapter');
+    s.scroll(frame.offsetTop - BAR - 3);
+    assert.equal(s.state()[0], chapter - 1, 'heading still below the bar edge belongs to the next scroll');
+    assert.deepEqual(shell(Array(8).fill(1600), ...[chapter, 0], '/txt/{i}.html', true, BAR).state(), [chapter, 0], 'reopen at chapter start is stable');
+  }
+  // Glass arrives after the first layout: the jump uses a guess, then realigns once to the real bar.
+  const late = shell(Array(8).fill(1600), 3, 0, '/txt/{i}.html', true, null);
+  late.window.yhGlass([{ x: 0, y: 0, w: 400, h: BAR, r: 0 }]); late.tick();
+  const lateFrame = late.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
+  assert(Math.abs(lateFrame.offsetTop - late.window.scrollY - BAR) < .001, 'late bar realigns the chapter-start jump');
+  assert.deepEqual(late.state(), [3, 0]);
+  // 1.0 FIX6: the chapter above grows after the jump (late image) while the viewport top sits
+  // in its tail behind the bar; compensation must keep the target chapter under the bar.
+  for (const bar of [BAR, 0]) {
+    const g = shell([1600, 300, 250], 2, 0, '/txt/{i}.html', true, bar);
+    g.heights[1] = 2300; g.tick(); g.tick();
+    const gf = g.flow.children.find(e => Number(e.attrs['data-ch']) === 2);
+    assert(Math.abs(gf.offsetTop - g.window.scrollY - bar) < .001, `growing previous chapter keeps the target (bar ${bar})`);
+    assert.equal(g.state()[0], 2, `target chapter still current after growth (bar ${bar})`);
+  }
+  // Mid-chapter progress is not shifted by the bar.
+  const mid = shell(Array(8).fill(1600), 4, .5, '/txt/{i}.html', true, BAR);
+  const midFrame = mid.flow.children.find(e => Number(e.attrs['data-ch']) === 4);
+  assert(Math.abs(mid.window.scrollY - midFrame.offsetTop - 400) < .001, 'mid-chapter restore ignores the bar');
+}
+console.log('PASS actual flow shell: trusted/blocked links, one-shot consume, tiny forward/backward, bounded/stable frames, boundary/live/reopen offsets, top-bar chapter line');

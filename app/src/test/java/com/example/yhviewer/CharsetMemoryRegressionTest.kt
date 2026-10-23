@@ -52,6 +52,25 @@ class CharsetMemoryRegressionTest {
         samples += "a".repeat(8191).toByteArray() + byteArrayOf(0xf0.toByte(), 0x9f.toByte()) // truncated multibyte
         val random = kotlin.random.Random(419)
         repeat(120) { samples += random.nextBytes(random.nextInt(0, 2000)) }
-        samples.forEach { bytes -> assertEquals(original(bytes), CharsetDetector.decode(bytes)) }
+        // v1.0：旧实现把 Big5 和无 BOM 的 UTF-16 都"成功"解成 GB18030 乱码（真机验收发现），这三种样本的
+        // 正确结果不再等于旧实现，改为断言解码正确。其余样本（UTF-8、GB18030、带 BOM、缓冲区边界、截断）
+        // 仍必须和旧实现逐字一致。
+        val changed = setOf(1, 2, 4) // UTF-16LE、UTF-16BE、Big5（均无 BOM）
+        samples.take(9).forEachIndexed { i, bytes ->
+            if (i in changed) {
+                val cs = listOf("UTF-8", "UTF-16LE", "UTF-16BE", "GB18030", "Big5")[i]
+                assertEquals("sample $i", String(bytes, Charset.forName(cs)), CharsetDetector.decode(bytes).text)
+                assertEquals("sample $i", cs, CharsetDetector.decode(bytes).charset.name())
+            } else {
+                assertEquals("sample $i", original(bytes), CharsetDetector.decode(bytes))
+            }
+        }
+        // 随机字节：本来就无法"正确"解码。只要求不抛异常、长度合理、编码在候选范围内
+        val allowed = setOf("UTF-8", "GB18030", "Big5", "UTF-16LE", "UTF-16BE")
+        samples.drop(9).forEach { bytes ->
+            val r = CharsetDetector.decode(bytes)
+            assertTrue(r.charset.name() in allowed)
+            assertTrue(bytes.isEmpty() || r.text.isNotEmpty())
+        }
     }
 }

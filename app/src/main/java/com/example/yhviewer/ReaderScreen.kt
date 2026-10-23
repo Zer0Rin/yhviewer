@@ -618,6 +618,7 @@ private fun FlowContent(
                 }
                 if (announced && handle.webView == null) break
                 val link = JsonStrings.decodeStringOrNull(handle.evaluate("window.YH ? YH.takeLink() : ''"))
+                if (!link.isNullOrEmpty()) android.util.Log.d("YHFlow", "link route=$link")
                 if (!link.isNullOrEmpty() && session == vm.documentSession && jump == vm.jumpTick) {
                     val uri = Uri.parse(link)
                     val path = uri.path.orEmpty()
@@ -644,6 +645,8 @@ private fun FlowContent(
                 // debounce when the chapter and ratio have not changed.
                 if (state != lastReported) {
                     lastReported = state
+                    // v1.0：真机上出现过"画面换章了、顶栏没变"，留一行日志方便对照（只在位置变化时打印）
+                    android.util.Log.d("YHFlow", "state chapter=${state.first} ratio=${state.second} vmChapter=${vm.chapter}")
                     vm.onFlowPosition(session, state.first, state.second, jump)
                 }
             }
