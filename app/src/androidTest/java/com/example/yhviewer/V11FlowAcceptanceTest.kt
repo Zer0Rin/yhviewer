@@ -474,16 +474,22 @@ class V11FlowAcceptanceTest {
             open(s, id)
             js(s, "YH.hold(true);window.scrollTo(0,document.querySelector('[data-ch=\"6\"]').offsetTop+40)")
             val before = anchor(s)
+            val beforeGeometry = geometry(s)
             val previous = frames(s).toString()
             js(s, "YH.hold(false)")
             compose.waitUntil(15_000) { frames(s).toString() != previous && js(s, "!!document.querySelector('[data-ch=\"5\"] iframe') && document.querySelector('[data-ch=\"5\"] iframe').offsetHeight>0") == "true" }
-            assertAnchor(before, settledAnchor(s, "5"))
+            val afterPrepend = settledAnchor(s, "5")
+            try { assertAnchor(before, afterPrepend) }
+            catch (failure: AssertionError) { throw AssertionError("prepend before=$beforeGeometry after=${geometry(s)}", failure) }
             js(s, "YH.hold(true)")
             val beforeGrowth = anchor(s)
             // Trusted test-only DOM manipulation models an image whose dimensions resolve late.
             js(s, """(()=>{const d=document.querySelector('[data-ch="5"] iframe').contentDocument;const img=d.createElement('img');img.id='late-test-image';img.alt='';img.style.cssText='display:block;width:100px;height:900px';d.body.prepend(img);})()""")
             compose.waitUntil(10_000) { js(s, "document.querySelector('[data-ch=\"5\"] iframe').offsetHeight >= document.querySelector('[data-ch=\"5\"] iframe').contentDocument.body.scrollHeight") == "true" }
-            assertAnchor(beforeGrowth, settledAnchor(s, "5"))
+            val growthGeometry = geometry(s)
+            val afterGrowth = settledAnchor(s, "5")
+            try { assertAnchor(beforeGrowth, afterGrowth) }
+            catch (failure: AssertionError) { throw AssertionError("growth before=$growthGeometry after=${geometry(s)}", failure) }
             bounded(s)
         }
     }
@@ -666,6 +672,19 @@ class V11FlowAcceptanceTest {
         }
     }
 
+    private fun barEdge(s: ActivityScenario<MainActivity>): Double = js(s,
+        "[...(document.getElementById('yh-glass')?.children||[])].filter(d=>d.style.opacity==='1').map(d=>d.getBoundingClientRect()).filter(r=>r.top<=2&&r.width>=innerWidth*.9).reduce((m,r)=>Math.max(m,r.bottom),0)").toDouble()
+    private fun hideToolbar(s: ActivityScenario<MainActivity>) {
+        if (compose.onAllNodesWithText("Aa").fetchSemanticsNodes().isEmpty()) return
+        val size = JSONObject(string(s, "JSON.stringify({w:innerWidth,h:innerHeight})"))
+        tapRenderedWebViewPoint(instrumentation, view(s), size.getDouble("w").toFloat() / 2, size.getDouble("h").toFloat() / 2)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Aa").fetchSemanticsNodes().isEmpty() && barEdge(s) == 0.0 }
+    }
+    /** Section geometry for failure messages: which chapters exist, where, and how tall. */
+    private fun geometry(s: ActivityScenario<MainActivity>): String = string(s, """
+        JSON.stringify({y:scrollY,vh:innerHeight,state:YH.state(),bar:[...(document.getElementById('yh-glass')?.children||[])].filter(d=>d.style.opacity==='1').map(d=>Math.round(d.getBoundingClientRect().bottom)),
+          sections:[...document.querySelectorAll('section')].map(e=>{const f=e.querySelector('iframe');return {ch:e.dataset.ch,top:e.offsetTop,h:e.offsetHeight,frame:f?.offsetHeight,body:f?.contentDocument?.body?.scrollHeight,ready:f?.contentDocument?.readyState}})})
+    """.trimIndent())
     /** The settings rows are a Text plus an unlabeled Switch; pick the Switch on the same line as [label]. */
     private fun switchInRow(label: String): SemanticsNodeInteraction {
         val row = compose.onNodeWithText(label).performScrollTo().fetchSemanticsNode().boundsInRoot
@@ -676,6 +695,10 @@ class V11FlowAcceptanceTest {
     }
     /** Dispatch a native WebView touch; JS only locates the real book link. */
     private fun clickLink(s: ActivityScenario<MainActivity>, id: String) {
+        // The glass top bar overlays the page. With hold(true) only the current chapter exists, so a
+        // link near its top cannot be scrolled below the bar, and a screen-coordinate tap would hit
+        // the bar instead (Standard stayed in chapter 4; Strict timed out). Read immersively instead.
+        hideToolbar(s)
         val targetFrame = "[...document.querySelectorAll('iframe')].find(f=>f.contentDocument?.getElementById('$id'))"
         js(s, """(()=>{const f=$targetFrame;const a=f.contentDocument.getElementById('$id');window.scrollTo(0,f.parentElement.offsetTop+a.getBoundingClientRect().top-Math.round(innerHeight*.45))})()""")
         var point: JSONObject? = null
@@ -709,8 +732,8 @@ class V11FlowAcceptanceTest {
             assertEquals(7, state(s).first)
             val offset = js(s, "(()=>{const f=document.querySelector('[data-ch=\"7\"] iframe');return f.getBoundingClientRect().top+f.contentDocument.getElementById('p12').getBoundingClientRect().top})()").toDouble()
             // The visible glass top bar, as registered with the page; 0 when the toolbar is hidden.
-            val barEdge = js(s, "[...(document.getElementById('yh-glass')?.children||[])].filter(d=>d.style.opacity==='1').map(d=>d.getBoundingClientRect()).filter(r=>r.top<=2&&r.width>=innerWidth*.9).reduce((m,r)=>Math.max(m,r.bottom),0)").toDouble()
-            assertEquals("Native anchor lands just below the top-bar edge (bar=$barEdge)", barEdge, offset, 2.0)
+            val edge = barEdge(s)
+            assertEquals("Native anchor lands just below the top-bar edge (bar=$edge)", edge, offset, 2.0)
         }
     }
     @Test fun epubScriptsRefreshAndNativeTopLinkCannotEscapeFlowShell() {
