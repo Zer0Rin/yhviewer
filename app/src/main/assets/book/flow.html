@@ -180,6 +180,27 @@
       }, true);
     }
 
+    // v1.0 修正：章节 iframe 不应该自己换成别的章节。真机（WebView 153）上点章节里的链接时，
+    // captureLinks 没拦下来，iframe 自己导航到了目标章：画面是第 3 章，外层还当它是第 2 章，
+    // 顶栏标题、章节号、进度都对不上。现在每次 load 都核对地址：不是这一格该显示的章节，就把目标
+    // 交给原生跳转（YH.takeLink → 按目标章节和锚点重建页面），并把这一格恢复成原来的章节。
+    function navigatedAway(s, d) {
+      var got, want;
+      try {
+        got = new URL(d.location.href);
+        want = new URL(url(s.i), window.location.href);
+      } catch (_) { return false; }
+      if (decodeURIComponent(got.pathname) === decodeURIComponent(want.pathname)) return false;
+      if (got.origin === window.location.origin && got.pathname.indexOf('/book/') === 0 &&
+          got.pathname.length > 6 && !pendingLink) {
+        pendingLink = got.pathname + got.hash;
+      }
+      // 章节自己反复跳走（例如恶意的自动刷新）时，最多恢复两次，避免来回重载
+      s.resets = (s.resets || 0) + 1;
+      if (s.resets <= 2) s.frame.src = url(s.i);
+      return true;
+    }
+
     function make(i) {
       var el = document.createElement('section');
       el.setAttribute('data-ch', String(i));
@@ -188,7 +209,13 @@
       f.setAttribute('scrolling', 'no');
       f.setAttribute('title', String(i + 1));
       var s = { i: i, el: el, frame: f, h: 0, loaded: false };
-      f.addEventListener('load', function () { wake(); if (doc(s)) loaded(s); });
+      f.addEventListener('load', function () {
+        wake();
+        var d = doc(s);
+        if (!d) return;
+        if (navigatedAway(s, d)) return;
+        loaded(s);
+      });
       el.appendChild(f);
       var tail = document.createElement('div');
       if (i < P.count - 1) tail.className = 'gap';
