@@ -76,8 +76,11 @@
 
     // Persist the chapter at viewport top. Keep the legacy scrollable-height
     // ratio, extending it above 1 only for continuous tail/gap offsets.
+    // 1.0 FIX5：判断"当前章"的线放在顶栏下沿（工具栏隐藏时就是屏幕顶端），而不是屏幕顶端：
+    // 章节标题一碰到顶栏下沿就算进入这一章。+0.5 容忍真机 WebView 把滚动位置对齐到物理像素后的亚像素误差
+    // （scrollTo 到章节顶端，实际 scrollY 可能小零点几像素，以前会被算成上一章）。
     function current() {
-      var probe = window.scrollY, s = null;
+      var probe = window.scrollY + topPad() + 0.5, s = null;
       for (var k = 0; k < secs.length; k++) if (probe >= top(secs[k])) s = secs[k];
       s = s || secs[0];
       if (!s) return null;
@@ -90,26 +93,52 @@
       return { i: s.i, ratio: Math.max(0, r), fraction: Math.max(0, (window.scrollY - top(s)) / Math.max(1, s.el.offsetHeight)) };
     }
 
-    function scrollToChapter(i, ratio, anchor) {
-      var s = find(i);
-      if (!s) return;
+    // 跳转落点。跳到章首（ratio 0）或锚点时，目标停在顶栏下方；章内其他比例（恢复阅读进度）照原样
+    function targetY(s, ratio, anchor) {
       var span = Math.max(0, s.h - vh()), r = Math.max(0, ratio || 0);
       var y = top(s) + span * Math.min(1, r) + Math.max(0, r - 1) * Math.max(1, span);
-      anchorJump = null;
+      var pad = r === 0 ? topPad() : 0;
       if (anchor) {
         var d = doc(s), el = d && (d.getElementById(anchor) || d.getElementsByName(anchor)[0]);
         // 1.0 FIX4：顶栏盖在正文上面（液态玻璃），锚点要停在顶栏下方，否则脚注被顶栏挡住
-        if (el) {
-          y = Math.max(0, top(s) + el.getBoundingClientRect().top - topPad());
-          anchorJump = { el: el, y: y, at: Date.now() };
-        }
+        if (el) { y = top(s) + el.getBoundingClientRect().top; pad = topPad(); }
       }
-      window.scrollTo(0, Math.max(0, y));
+      return { y: Math.max(0, y - pad), padded: pad > 0 };
+    }
+    function scrollToChapter(i, ratio, anchor) {
+      var s = find(i);
+      if (!s) return;
+      var t = targetY(s, ratio, anchor);
+      window.scrollTo(0, reachable(s, t.y));
+      lastJump = t.padded ? { i: i, ratio: ratio, anchor: anchor, rel: window.scrollY - top(s), at: Date.now() } : null;
+    }
+    // 落点在目标章上方、而那一段（前一章）还没加载好时，先停在目标章章首，等它加载完再对齐：
+    // 停在没加载的章节里，补偿滚动会以那一章为基准，落点就丢了
+    function reachable(s, y) {
+      if (y >= top(s)) return y;
+      for (var k = 0; k < secs.length; k++) {
+        var o = secs[k];
+        if (o !== s && y >= top(o) && y < top(o) + o.el.offsetHeight) return o.loaded ? y : top(s);
+      }
+      return top(s);
+    }
+    // 跳转后几秒内、用户还没滚动时，保持落点：
+    // - 刚跳转时只有目标章，章首上方没有内容可滚，留不出顶栏的位置；前一章补进来后再对齐；
+    // - 顶栏的真实高度晚一步到（先按估计值跳）。
+    // "用户没动"按相对目标章的位置判断，补章、补偿滚动不算用户滚动。
+    function settleJump() {
+      var j = lastJump;
+      if (!j) return;
+      var js = find(j.i);
+      if (!js || Date.now() - j.at > 3000 || Math.abs(window.scrollY - top(js) - j.rel) >= 2) { lastJump = null; return; }
+      var y = reachable(js, targetY(js, j.ratio, j.anchor).y);
+      if (Math.abs(window.scrollY - y) >= 0.5) window.scrollTo(0, y);
+      j.rel = window.scrollY - top(js);
     }
 
     // 顶栏下沿（CSS px）。从 yhGlass 收到的区域里取：贴着页面顶端、几乎整宽的那块就是顶栏。
     // 还没收到过任何区域时先按常见顶栏高度估计；收到过但没有顶栏 = 工具栏已隐藏，不留空。
-    var barPad = 0, glassSeen = false, anchorJump = null;
+    var barPad = 0, glassSeen = false, lastJump = null;
     var BAR_GUESS = 96;
     function topPad() { return glassSeen ? barPad : BAR_GUESS; }
     function barFrom(rects) {
@@ -260,6 +289,7 @@
       if (busy === s) busy = null;
       trim();
       fill();
+      settleJump();
     }
 
     // 只保留当前章附近的 MAX 章；从离当前章远的一头移除
@@ -373,20 +403,9 @@
         document.documentElement.appendChild(host);
       }
       rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
-      // 刚跳到锚点（1.5 秒内）、用户还没动过时，顶栏高度变了（第一次拿到真实高度、
-      // 顶栏区域晚一步登记）就按新高度再对齐一次
-      var oldPad = topPad();
       glassSeen = true;
       barPad = barFrom(rects);
-      var j = anchorJump;
-      if (j && barPad !== oldPad && Date.now() - j.at < 1500 && j.el.isConnected && Math.abs(window.scrollY - j.y) < 2) {
-        var sec = null;
-        for (var k = 0; k < secs.length; k++) if (doc(secs[k]) === j.el.ownerDocument) sec = secs[k];
-        if (sec) {
-          j.y = Math.max(0, top(sec) + j.el.getBoundingClientRect().top - barPad);
-          window.scrollTo(0, j.y);
-        }
-      }
+      settleJump();   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
         d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);' +
@@ -440,6 +459,7 @@
       fill();
       var active = changed || pending.length > 0 || busy || !ready || secs.length !== before ||
         secs.some(function (s) { return !s.loaded; });
+      settleJump();
       quiet = active ? 0 : quiet + 1;
       if (quiet >= 5 && ticker !== null && typeof clearInterval === 'function') {
         clearInterval(ticker);

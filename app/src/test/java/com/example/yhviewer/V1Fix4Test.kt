@@ -21,7 +21,18 @@ class V1Fix4Test {
     @Test
     fun flowAnchorJumpLeavesRoomForTopBar() {
         val f = asset("book/flow.html")
-        assertTrue(f.contains("el.getBoundingClientRect().top - topPad()"))
+        assertTrue(f.contains("y = top(s) + el.getBoundingClientRect().top; pad = topPad();"))
         assertTrue(f.contains("barPad = barFrom(rects)"))
+    }
+
+    /** 1.0 FIX5：连续模式跳到章首时，章节标题停在顶栏下方，并且算作这一章（大 TXT 目录跳转停在上一章） */
+    @Test
+    fun flowChapterLineIsTheTopBarEdge() {
+        val f = asset("book/flow.html")
+        assertTrue(f.contains("var probe = window.scrollY + topPad() + 0.5"))
+        assertTrue(f.contains("var pad = r === 0 ? topPad() : 0;"))
+        assertTrue(f.contains("function settleJump()"))
+        // 行为本身由 scripts/test-flow-shell.cjs 的 top-bar chapter line 断言覆盖
+        assertTrue(File("../scripts/test-flow-shell.cjs").readText().contains("top-bar chapter line"))
     }
 }
