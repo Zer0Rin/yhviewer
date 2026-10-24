@@ -351,6 +351,10 @@
     }
 
     function restore(state) {
+      // 1.0.1：跳转还在生效（用户没动过）时，排版恢复完以后以跳转目标为准。否则页面加载后第一次
+      // setReading 的恢复会把刚对齐到真实顶栏的落点改回估计值（CI：88 → 96.9）。
+      var j = lastJump, js = j && find(j.i);
+      var pending = !!js && Math.abs(window.scrollY - top(js) - j.rel) < 2;
       fit(secs, true);
       updateContinuation();
       var c = state && state.c;
@@ -364,6 +368,7 @@
         offset = rect.top + anchor.fraction * rect.height;
       }
       window.scrollTo(0, top(s) + offset);
+      if (pending && lastJump === j) { j.rel = window.scrollY - top(js); settleJump(true); }
     }
 
     function relayout() {

@@ -234,6 +234,14 @@ for (const y of [900, 1500, 1700, 2500]) {
   slow.window.yhGlass([{ x: 0, y: 0, w: 400, h: 88, r: 0 }]); slow.tick();
   const slowFrame = slow.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
   assert(Math.abs(slowFrame.offsetTop - slow.window.scrollY - 88) < .001, 'first real bar height realigns even after a slow load');
+  // 1.0.1: native pushes setReading right after load; its deferred restore must not undo a
+  // realignment that happened in between (CI trace: jump at guess 96, bar 88 arrives, restore -> 96.9).
+  const restyled = shell(Array(8).fill(1600), 3, 0, '/txt/{i}.html', true, null);
+  restyled.window.setReading(':root{--read-scale:1}');
+  restyled.window.yhGlass([{ x: 0, y: 0, w: 400, h: 88, r: 0 }]);
+  restyled.tick();
+  const restyledFrame = restyled.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
+  assert(Math.abs(restyledFrame.offsetTop - restyled.window.scrollY - 88) < .001, `restyle restore keeps the realigned jump (${restyledFrame.offsetTop - restyled.window.scrollY})`);
   // Later bar changes (toggling the toolbar) still only realign within the short window.
   slow.clock.now += 10_000; slow.window.yhGlass([]); slow.tick();
   assert(Math.abs(slowFrame.offsetTop - slow.window.scrollY - 88) < .001, 'toolbar toggle long after the jump does not move the page');
