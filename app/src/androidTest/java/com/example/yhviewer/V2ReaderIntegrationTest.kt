@@ -214,7 +214,7 @@ class V2ReaderIntegrationTest {
             assertEquals("Skipped chunks must not create a giant blank horizontal range", "true",
                 js(s, "document.getElementById('code').scrollWidth<1000"))
             compose.onNodeWithText("Aa").performClick()
-            compose.onNode(hasText("终端", substring = true)).assertIsDisplayed()
+            compose.onNode(hasText("终端", substring = true)).performScrollTo().assertIsDisplayed()
         }
     }
 

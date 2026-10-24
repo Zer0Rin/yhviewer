@@ -133,6 +133,19 @@ class V3ReadingIntegrationTest {
         readyView(s)
         val duration = if (hold) ViewConfiguration.getLongPressTimeout() + 100L else 30L
         repeat(if (double) 2 else 1) {
+            if (!hold) {
+                // One UI task with synthetic event times: a slow emulator can no longer stretch a
+                // 30 ms tap past the long-press timeout between two separate onActivity calls.
+                s.onActivity { a -> web(a.window.decorView)!!.let { w ->
+                    val start = android.os.SystemClock.uptimeMillis()
+                    val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, w.width*x, w.height*.5f, 0)
+                    w.dispatchTouchEvent(down); down.recycle()
+                    val up = MotionEvent.obtain(start, start + duration, MotionEvent.ACTION_UP, w.width*x, w.height*.5f, 0)
+                    w.dispatchTouchEvent(up); up.recycle()
+                } }
+                if (double) Thread.sleep(50)
+                return@repeat
+            }
             s.onActivity { a -> web(a.window.decorView)!!.let { w ->
                 val start = android.os.SystemClock.uptimeMillis()
                 val down = MotionEvent.obtain(start, start, MotionEvent.ACTION_DOWN, w.width*x, w.height*.5f, 0)
@@ -147,6 +160,10 @@ class V3ReadingIntegrationTest {
             if (double) Thread.sleep(50)
         }
         Thread.sleep(ViewConfiguration.getDoubleTapTimeout() + 200L)
+    }
+    /** Wait for the toolbar toggle to settle (exit/enter animations included) before asserting on it. */
+    private fun barsShown(shown: Boolean) = compose.waitUntil(5_000) {
+        compose.onAllNodesWithText("Aa").fetchSemanticsNodes().isNotEmpty() == shown
     }
     private fun quickRightTaps(s: ActivityScenario<MainActivity>, count: Int) {
         readyView(s)
@@ -202,9 +219,10 @@ class V3ReadingIntegrationTest {
             var height = 0
             s.onActivity { a -> original=web(a.window.decorView); height=original!!.height }
             tap(s, .5f)
-            compose.onNodeWithText("Aa").assertDoesNotExist()
+            barsShown(false)
             s.onActivity { a -> assertEquals(height, web(a.window.decorView)!!.height); assertEquals(.4f, web(a.window.decorView)!!.scrollRatio(), .025f) }
             tap(s, .5f)
+            barsShown(true)
             compose.onNodeWithText("Aa").performClick()
             compose.onNodeWithText("主题").assertIsDisplayed()
             // Font chips have a nearer horizontal scroll parent; scroll the outer
@@ -271,8 +289,10 @@ class V3ReadingIntegrationTest {
             compose.waitForIdle()
             scroll(s, .3f)
             tap(s, .9f)
+            barsShown(false) // tap paging is off, so a side tap only toggles the toolbar
             s.onActivity { a -> assertEquals(.3f, web(a.window.decorView)!!.scrollRatio(), .025f) }
             tap(s, .5f)
+            barsShown(true)
             compose.onNodeWithText("‹ 书架").performClick()
             compose.waitForIdle()
             s.onActivity { a -> assertEquals(originalKeep, a.window.decorView.keepScreenOn) }

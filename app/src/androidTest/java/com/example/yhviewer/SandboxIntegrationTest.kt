@@ -75,13 +75,24 @@ class SandboxIntegrationTest {
         assertEquals("The tested APK must match the permission round", expectInternet,
             compose.activity.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED)
         if (expectInternet) {
-            val connection = URL("https://example.com/").openConnection() as HttpsURLConnection
-            try {
-                connection.connectTimeout = 15_000
-                connection.readTimeout = 15_000
-                assertTrue("Positive control must have real internet access", connection.responseCode in 200..399)
-                Log.i("SandboxTest", "INTERNET positive control: HTTPS reachable (${connection.responseCode})")
-            } finally { connection.disconnect() }
+            // The positive control depends on the CI runner's network: record the real status and
+            // retry once, but never pass without a 2xx/3xx answer.
+            var status = -1
+            var error: Throwable? = null
+            for (attempt in 1..2) {
+                val connection = URL("https://example.com/").openConnection() as HttpsURLConnection
+                try {
+                    connection.connectTimeout = 15_000
+                    connection.readTimeout = 15_000
+                    status = connection.responseCode
+                    error = null
+                } catch (e: java.io.IOException) { status = -1; error = e }
+                finally { connection.disconnect() }
+                Log.i("SandboxTest", "INTERNET positive control attempt $attempt: status=$status error=$error")
+                if (status in 200..399) break
+                Thread.sleep(2_000)
+            }
+            assertTrue("Positive control must have real internet access (status=$status error=$error)", status in 200..399)
         }
         val html = instrumentation.context.assets.open("sandbox-test.html").bufferedReader().use { it.readText() }
         repeat(2) { round ->

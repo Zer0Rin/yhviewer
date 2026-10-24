@@ -114,7 +114,11 @@
       var t = targetY(s, ratio, anchor);
       window.scrollTo(0, reachable(s, t.y));
       lastJump = t.padded ? { i: i, ratio: ratio, anchor: anchor, rel: window.scrollY - top(s), at: Date.now() } : null;
+      note('jump', { i: i, y: t.y, at: window.scrollY, pad: topPad(), seen: glassSeen });
     }
+    // 诊断：最近 24 个和落点有关的事件，仪器测试失败时通过 YH.debug() 读出（只有数字，不含正文）
+    var trace = [];
+    function note(kind, data) { trace.push([Date.now() % 100000, kind, data]); if (trace.length > 24) trace.shift(); }
     // 落点在目标章上方、而那一段（前一章）还没加载好时，先停在目标章章首，等它加载完再对齐：
     // 停在没加载的章节里，补偿滚动会以那一章为基准，落点就丢了
     function reachable(s, y) {
@@ -129,11 +133,17 @@
     // - 刚跳转时只有目标章，章首上方没有内容可滚，留不出顶栏的位置；前一章补进来后再对齐；
     // - 顶栏的真实高度晚一步到（先按估计值跳）。
     // "用户没动"按相对目标章的位置判断，补章、补偿滚动不算用户滚动。
-    function settleJump() {
+    // 1.0.1：真实顶栏高度第一次到达之前，跳转不过期（慢设备上它可能 3 秒后才到，落点会一直停在估计值上）。
+    // firstBar：这次调用就是第一次拿到真实高度，不看时间。
+    function settleJump(firstBar) {
       var j = lastJump;
       if (!j) return;
       var js = find(j.i);
-      if (!js || Date.now() - j.at > 3000 || Math.abs(window.scrollY - top(js) - j.rel) >= 2) { lastJump = null; return; }
+      var expired = !firstBar && glassSeen && Date.now() - j.at > 3000;
+      if (!js || expired || Math.abs(window.scrollY - top(js) - j.rel) >= 2) {
+        note('drop', { found: !!js, expired: expired, rel: js ? window.scrollY - top(js) : null, want: j.rel });
+        lastJump = null; return;
+      }
       var y = reachable(js, targetY(js, j.ratio, j.anchor).y);
       if (Math.abs(window.scrollY - y) >= 0.5) window.scrollTo(0, y);
       j.rel = window.scrollY - top(js);
@@ -341,6 +351,10 @@
     }
 
     function restore(state) {
+      // 1.0.1：跳转还在生效（用户没动过）时，排版恢复完以后以跳转目标为准。否则页面加载后第一次
+      // setReading 的恢复会把刚对齐到真实顶栏的落点改回估计值（CI：88 → 96.9）。
+      var j = lastJump, js = j && find(j.i);
+      var pending = !!js && Math.abs(window.scrollY - top(js) - j.rel) < 2;
       fit(secs, true);
       updateContinuation();
       var c = state && state.c;
@@ -354,6 +368,7 @@
         offset = rect.top + anchor.fraction * rect.height;
       }
       window.scrollTo(0, top(s) + offset);
+      if (pending && lastJump === j) { j.rel = window.scrollY - top(js); settleJump(true); }
     }
 
     function relayout() {
@@ -406,9 +421,11 @@
         document.documentElement.appendChild(host);
       }
       rects = Array.isArray(rects) ? rects.slice(0, 4) : [];
+      var firstBar = !glassSeen;
       glassSeen = true;
       barPad = barFrom(rects);
-      settleJump();   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
+      note('glass', { pad: barPad, first: firstBar, n: rects.length });
+      settleJump(firstBar);   // 顶栏高度可能变了（第一次拿到真实高度、顶栏区域晚一步登记）
       while (host.children.length < rects.length) {
         var d = document.createElement('div');
         d.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity 160ms cubic-bezier(0.23, 1, 0.32, 1);' +
@@ -436,6 +453,7 @@
       },
       hold: function (on) { hold = !!on; wake(); if (!hold) fill(); },
       takeLink: function () { var link = pendingLink; pendingLink = ''; return link; },
+      debug: function () { return JSON.stringify({ seen: glassSeen, pad: barPad, y: window.scrollY, jump: lastJump && { i: lastJump.i, rel: lastJump.rel }, trace: trace }); },
     };
 
     window.addEventListener('scroll', function () {

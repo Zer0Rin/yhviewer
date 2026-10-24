@@ -8,6 +8,7 @@ const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].a
 // bar: native top-bar height in CSS px reported through yhGlass before load (0 = toolbar hidden / immersive).
 function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeHandshake = true, bar = 0) {
   const jobs = [], intervals = [], events = {}, seen = new Set();
+  const clock = { now: 0 }; // the shell's Date.now(); tests advance it explicitly
   const baseHeights = heights.slice();
   let requests = 0, maxFrames = 0;
   class El {
@@ -76,13 +77,13 @@ function shell(heights, start = 0, ratio = 0, pattern = '/txt/{i}.html', nativeH
     scrollTo(x, y) { const next = Math.max(0, Math.min(y, document.documentElement.scrollHeight - 800)); if (next !== this.scrollY) { this.scrollY = next; jobs.push(() => events.scroll?.()); } },
     addEventListener: (name, fn) => { events[name] = fn; }
   };
-  vm.runInNewContext(script, { document, window, URL, requestAnimationFrame: fn => jobs.push(fn), setInterval: fn => intervals.push(fn) });
+  vm.runInNewContext(script, { document, window, URL, Date: { now: () => clock.now }, requestAnimationFrame: fn => jobs.push(fn), setInterval: fn => intervals.push(fn) });
   function pump() { let n = 0; while (jobs.length) { assert(++n < 1000, 'unbounded load/evict loop'); jobs.shift()(); } checkFrames(); }
   function tick() { intervals.forEach(fn => fn()); pump(); }
   if (bar !== null) window.yhGlass(bar ? [{ x: 0, y: 0, w: 400, h: bar, r: 0 }] : []);
   pump(); tick();
   if (nativeHandshake) { window.YH.hold(false); tick(); }
-  return { window, flow, start, seen, heights, tick, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
+  return { window, flow, start, seen, heights, tick, clock, scroll(y) { window.scrollTo(0, y); pump(); tick(); },
     state() { return window.YH.state().split(',').map(Number); },
     requests: () => requests, maxFrames: () => maxFrames };
 }
@@ -226,6 +227,24 @@ for (const y of [900, 1500, 1700, 2500]) {
   const lateFrame = late.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
   assert(Math.abs(lateFrame.offsetTop - late.window.scrollY - BAR) < .001, 'late bar realigns the chapter-start jump');
   assert.deepEqual(late.state(), [3, 0]);
+  // 1.0.1: on a slow device the first real bar height can arrive long after the jump. The jump
+  // must not expire before then, or it stays on the guessed height (CI: 96.9 vs a real 88).
+  const slow = shell(Array(8).fill(1600), 3, 0, '/txt/{i}.html', true, null);
+  slow.clock.now += 10_000; for (let k = 0; k < 5; k++) slow.tick();
+  slow.window.yhGlass([{ x: 0, y: 0, w: 400, h: 88, r: 0 }]); slow.tick();
+  const slowFrame = slow.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
+  assert(Math.abs(slowFrame.offsetTop - slow.window.scrollY - 88) < .001, 'first real bar height realigns even after a slow load');
+  // 1.0.1: native pushes setReading right after load; its deferred restore must not undo a
+  // realignment that happened in between (CI trace: jump at guess 96, bar 88 arrives, restore -> 96.9).
+  const restyled = shell(Array(8).fill(1600), 3, 0, '/txt/{i}.html', true, null);
+  restyled.window.setReading(':root{--read-scale:1}');
+  restyled.window.yhGlass([{ x: 0, y: 0, w: 400, h: 88, r: 0 }]);
+  restyled.tick();
+  const restyledFrame = restyled.flow.children.find(e => Number(e.attrs['data-ch']) === 3);
+  assert(Math.abs(restyledFrame.offsetTop - restyled.window.scrollY - 88) < .001, `restyle restore keeps the realigned jump (${restyledFrame.offsetTop - restyled.window.scrollY})`);
+  // Later bar changes (toggling the toolbar) still only realign within the short window.
+  slow.clock.now += 10_000; slow.window.yhGlass([]); slow.tick();
+  assert(Math.abs(slowFrame.offsetTop - slow.window.scrollY - 88) < .001, 'toolbar toggle long after the jump does not move the page');
   // 1.0 FIX6: the chapter above grows after the jump (late image) while the viewport top sits
   // in its tail behind the bar; compensation must keep the target chapter under the bar.
   for (const bar of [BAR, 0]) {
